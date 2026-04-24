@@ -29,3 +29,8 @@ class Config:
     ANOMALY_ZSCORE_THRESHOLD = float(os.getenv("ANOMALY_ZSCORE_THRESHOLD", 3.0))
     FORECAST_HORIZON = int(os.getenv("FORECAST_HORIZON", 12))          # number of future intervals
     SUMMARY_INTERVAL_MINUTES = int(os.getenv("SUMMARY_INTERVAL_MINUTES", 15))  # aggregation bucket size
+
+    # AQI Thresholds (EPA Standards)
+    AQI_ALERT_WARNING = int(os.getenv("AQI_ALERT_WARNING", 100))       # Moderate level
+    AQI_ALERT_CRITICAL = int(os.getenv("AQI_ALERT_CRITICAL", 150))     # Unhealthy for Sensitive Groups
+    AQI_ALERT_SEVERE = int(os.getenv("AQI_ALERT_SEVERE", 200))         # Unhealthy level

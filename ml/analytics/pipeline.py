@@ -2,6 +2,7 @@ from pymongo import MongoClient
 from datetime import datetime, timezone, timedelta
 from config import Config
 from anomaly.detector import detect_anomalies
+from anomaly.alert_sender import check_aqi_and_alert
 from analytics.summary import summarize
 from analytics.forecast import simple_forecast
 
@@ -36,6 +37,11 @@ def run_once():
     client = _client()
     db = client[Config.MONGO_DB]
     readings = _fetch(db, since=datetime.utcnow() - timedelta(minutes=60))
+    
+    # Check AQI and send alerts if thresholds exceeded
+    if readings:
+        check_aqi_and_alert(readings)
+    
     # Anomalies
     anomalies = detect_anomalies(readings)
     if anomalies:

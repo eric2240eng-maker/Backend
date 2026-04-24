@@ -40,6 +40,8 @@ export default function RealTimeData(){
   const [alerts, setAlerts] = useState([]);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [showStats, setShowStats] = useState(true);
+  const [sensorHealth, setSensorHealth] = useState(null);
+  const [healthLoading, setHealthLoading] = useState(false);
 
   // Calculate statistics
   const stats = useMemo(() => {
@@ -195,6 +197,35 @@ export default function RealTimeData(){
       socket.off('sensorData', handleSensor);
     };
   }, [autoRefresh]);
+
+  // Fetch sensor health status
+  useEffect(() => {
+    let active = true;
+    let healthInterval;
+
+    const fetchSensorHealth = async () => {
+      try {
+        setHealthLoading(true);
+        const resp = await api.get('/api/diagnostics/sensor-status');
+        if (active && resp?.data) {
+          setSensorHealth(resp.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch sensor health:', err);
+      } finally {
+        if (active) setHealthLoading(false);
+      }
+    };
+
+    fetchSensorHealth();
+    // Refresh sensor health every 30 seconds
+    healthInterval = setInterval(fetchSensorHealth, 30000);
+
+    return () => {
+      active = false;
+      clearInterval(healthInterval);
+    };
+  }, []);
 
   // Export data functions
   const exportCSV = () => {
@@ -400,39 +431,129 @@ export default function RealTimeData(){
           width: '44px',
           height: '44px',
           borderRadius: '50%',
-          backgroundColor: activeSensors === 9 ? 'rgba(0,228,0,0.15)' : activeSensors > 0 ? 'rgba(255,193,7,0.15)' : 'rgba(255,0,0,0.15)',
+          backgroundImage: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center'
-        }}></span>
-        <div>
-          <div style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)', marginBottom: '2px' }}>
-            Active Sensors
+          justifyContent: 'center',
+          fontSize: '22px',
+          fontWeight: 'bold'
+        }}>
+          {activeSensors}/{totalSensors}
+        </span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Active Sensors</div>
+          <div style={{ fontSize: '12px', opacity: '0.7' }}>
+            {activeSensors} out of {totalSensors} sensors reporting data
           </div>
-          <div style={{ fontSize: '28px', fontWeight: '700', color: activeSensors === 9 ? '#00e400' : activeSensors > 0 ? '#ffc107' : '#ff0000' }}>
-            {activeSensors}/9
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginLeft: 'auto' }}>
-          {sensorKeys.map(key => {
-            const labels = { pm1: 'PM1.0', pm25: 'PM2.5', pm10: 'PM10', co: 'CO', co2: 'CO₂', temperature: 'Temp', humidity: 'Humid', voc_index: 'VOC', nox_index: 'NOx' };
-            const active = metrics[key] != null;
-            return (
-              <span key={key} style={{
-                fontSize: '11px',
-                padding: '3px 8px',
-                borderRadius: '12px',
-                backgroundColor: active ? 'rgba(0,228,0,0.15)' : 'rgba(255,0,0,0.1)',
-                color: active ? '#00e400' : 'rgba(255,255,255,0.3)',
-                border: `1px solid ${active ? 'rgba(0,228,0,0.3)' : 'rgba(255,255,255,0.1)'}`,
-                fontWeight: '500'
-              }}>
-                {labels[key]}
-              </span>
-            );
-          })}
         </div>
       </div>
+
+      {/* Sensor Health Status Panel */}
+      {sensorHealth && (
+        <div style={{
+          backgroundColor: sensorHealth.status === 'HEALTHY' ? 'rgba(34, 197, 94, 0.1)' : 
+                          sensorHealth.status === 'WARNING' ? 'rgba(245, 158, 11, 0.1)' :
+                          'rgba(239, 68, 68, 0.1)',
+          borderRadius: '12px',
+          padding: '16px 20px',
+          marginBottom: '20px',
+          border: `1px solid ${sensorHealth.status === 'HEALTHY' ? '#22c55e' : 
+                            sensorHealth.status === 'WARNING' ? '#f59e0b' :
+                            '#ef4444'}`,
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: '16px'
+        }}>
+          <div style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '50%',
+            backgroundColor: sensorHealth.status === 'HEALTHY' ? '#22c55e' : 
+                            sensorHealth.status === 'WARNING' ? '#f59e0b' :
+                            '#ef4444',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '24px',
+            flexShrink: 0
+          }}>
+            {sensorHealth.status === 'HEALTHY' ? '✅' : 
+             sensorHealth.status === 'WARNING' ? '⚠️' : '🔴'}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '8px', fontSize: '16px' }}>
+              Sensor Health: {sensorHealth.status}
+            </div>
+            <div style={{ fontSize: '12px', opacity: '0.7', lineHeight: '1.5' }}>
+              <div>Last Update: {new Date(sensorHealth.lastUpdate).toLocaleTimeString()}</div>
+              <div>Data Age: {Math.floor(sensorHealth.dataAge)} minutes</div>
+              <div>Active: {sensorHealth.activeSensors}/{sensorHealth.totalCriticalSensors} critical sensors</div>
+              {sensorHealth.issueCount.total > 0 && (
+                <div style={{ marginTop: '8px', color: '#ef4444' }}>
+                  🔧 Issues Found: {sensorHealth.issueCount.critical} critical, {sensorHealth.issueCount.warning} warnings
+                </div>
+              )}
+            </div>
+          </div>
+          
+          {/* Sensor Status Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: '8px', minWidth: '300px' }}>
+            {Object.entries(sensorHealth.sensorStatus || {}).slice(0, 6).map(([sensor, status]) => (
+              <div key={sensor} style={{
+                padding: '8px',
+                borderRadius: '8px',
+                fontSize: '11px',
+                textAlign: 'center',
+                backgroundColor: status.status === 'OK' ? 'rgba(34, 197, 94, 0.2)' :
+                                status.status === 'INVALID' ? 'rgba(245, 158, 11, 0.2)' :
+                                status.status === 'MISSING' ? 'rgba(239, 68, 68, 0.2)' :
+                                'rgba(156, 163, 175, 0.2)',
+                border: `1px solid ${status.status === 'OK' ? '#22c55e' :
+                                  status.status === 'INVALID' ? '#f59e0b' :
+                                  status.status === 'MISSING' ? '#ef4444' :
+                                  '#9ca3af'}`
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>{sensor}</div>
+                <div style={{
+                  color: status.status === 'OK' ? '#22c55e' :
+                       status.status === 'INVALID' ? '#f59e0b' :
+                       status.status === 'MISSING' ? '#ef4444' :
+                       '#9ca3af'
+                }}>
+                  {status.status === 'OK' ? '✓' : '✗'}
+                </div>
+                {status.value !== null && (
+                  <div style={{ fontSize: '10px', marginTop: '2px', opacity: 0.7 }}>
+                    {typeof status.value === 'number' ? status.value.toFixed(1) : status.value}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          
+          {/* Issues List */}
+          {sensorHealth.issues && sensorHealth.issues.length > 0 && (
+            <div style={{
+              backgroundColor: 'rgba(0,0,0,0.2)',
+              borderRadius: '8px',
+              padding: '12px',
+              minWidth: '300px',
+              maxHeight: '150px',
+              overflowY: 'auto'
+            }}>
+              <div style={{ fontWeight: 'bold', marginBottom: '8px', fontSize: '12px' }}>Issues:</div>
+              {sensorHealth.issues.slice(0, 4).map((issue, idx) => (
+                <div key={idx} style={{ fontSize: '11px', marginBottom: '4px', color: issue.severity === 'CRITICAL' ? '#ef4444' : '#f59e0b' }}>
+                  • {issue.message}
+                </div>
+              ))}
+              {sensorHealth.issues.length > 4 && (
+                <div style={{ fontSize: '11px', opacity: 0.7 }}>... and {sensorHealth.issues.length - 4} more</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* AQI Display */}
       {currentAQI && (
