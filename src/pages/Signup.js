@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../config/api';
+import { useAuth } from '../context/AuthContext';
 import './FullDashboard.css';
 
 const Signup = () => {
@@ -7,6 +9,8 @@ const Signup = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const { login } = useAuth();
+  const navigate = useNavigate();
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -111,6 +115,27 @@ const Signup = () => {
 
           <button className="btn-primary" type="submit" disabled={loading}>
             {loading ? 'Signing up...' : 'Sign up'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              login({ id: 'guest', name: 'Guest User', email: 'guest@local' });
+              navigate('/dashboard', { replace: true });
+            }}
+            style={{
+              marginTop: 12,
+              width: '100%',
+              padding: '10px',
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              cursor: 'pointer',
+              borderRadius: '4px',
+              fontSize: '14px',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            Skip for now (Guest)
           </button>
         </form>
       </div>
