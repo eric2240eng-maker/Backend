@@ -1,5 +1,6 @@
 // src/pages/HistoricalData.js
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import html2canvas from 'html2canvas';
 import { api } from '../config/api';
 import {
   ComposedChart,
@@ -440,6 +441,47 @@ export default function HistoricalData() {
         });
       }
 
+      // ── Charts: capture each metric chart from DOM ─────────
+      const chartEls = document.querySelectorAll('[data-pdf-chart]');
+      if (chartEls.length > 0) {
+        addSection('Metric Charts');
+        const PAGE_W2 = doc.internal.pageSize.getWidth();
+        const MARGIN2 = 15;
+        const chartW  = PAGE_W2 - MARGIN2 * 2;
+
+        for (const el of chartEls) {
+          const label = el.getAttribute('data-pdf-chart');
+          checkPage(70);
+
+          // chart label
+          doc.setFontSize(8);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(0, 229, 160);
+          doc.text(label, MARGIN2, y);
+          y += 4;
+
+          try {
+            const canvas = await html2canvas(el, {
+              backgroundColor: '#070d1c',
+              scale: 1.5,
+              useCORS: true,
+              logging: false,
+            });
+            const imgData  = canvas.toDataURL('image/png');
+            const imgH     = (canvas.height / canvas.width) * chartW;
+            checkPage(imgH + 8);
+            doc.addImage(imgData, 'PNG', MARGIN2, y, chartW, imgH);
+            y += imgH + 10;
+          } catch (chartErr) {
+            doc.setFontSize(8);
+            doc.setTextColor(200, 100, 100);
+            doc.text('[Chart capture failed]', MARGIN2, y);
+            doc.setTextColor(220, 230, 245);
+            y += 8;
+          }
+        }
+      }
+
       // ── Footer on every page ───────────────────────────────
       const totalPages = doc.internal.getNumberOfPages();
       for (let p = 1; p <= totalPages; p++) {
@@ -740,7 +782,7 @@ export default function HistoricalData() {
               {/* Two-Chart Layout: Trend + Distribution */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
                 {/* Trend Chart (Area) */}
-                <div>
+                <div data-pdf-chart={`${param.label} — Trend`}>
                   <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255,255,255,0.6)', display: 'block', marginBottom: 12 }}>
                     Trend (Line)
                   </label>
@@ -765,7 +807,7 @@ export default function HistoricalData() {
                 </div>
 
                 {/* Distribution Chart (Bar) */}
-                <div>
+                <div data-pdf-chart={`${param.label} — Distribution`}>
                   <label style={{ fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'rgba(255,255,255,0.6)', display: 'block', marginBottom: 12 }}>
                     Distribution (Bar)
                   </label>
