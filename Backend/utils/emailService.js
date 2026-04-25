@@ -9,13 +9,31 @@ let _transporter = null;
 
 function getTransporter() {
   if (_transporter) return _transporter;
-  _transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,   // Gmail App Password (16-char)
-    },
-  });
+
+  const provider = (process.env.EMAIL_PROVIDER || 'gmail').toLowerCase();
+
+  if (provider === 'brevo') {
+    // Brevo (Sendinblue) SMTP — works without App Passwords
+    _transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST || 'smtp-relay.brevo.com',
+      port: Number(process.env.EMAIL_PORT || 587),
+      secure: false,
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+  } else {
+    // Gmail SMTP — requires App Password
+    _transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+      },
+    });
+  }
+
   return _transporter;
 }
 
