@@ -1,5 +1,5 @@
 // src/pages/Analytics.js
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { api } from '../config/api';
 import {
   Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
@@ -172,6 +172,100 @@ export default function Analytics(){
     return predictions;
   };
 
+  // ── Local fallback: summary stats computed from rows ────────
+  const localSummary = useMemo(() => {
+    if (!rows.length) return null;
+    const allPM25 = rows.map(r => Number(r.pm25 || 0)).filter(v => v > 0);
+    if (!allPM25.length) return null;
+    const sum = allPM25.reduce((a, b) => a + b, 0);
+    return {
+      count: rows.length,
+      min: Math.min(...allPM25).toFixed(2),
+      max: Math.max(...allPM25).toFixed(2),
+      avg: (sum / allPM25.length).toFixed(2),
+      generated_at: new Date().toISOString(),
+      _local: true
+    };
+  }, [rows]);
+
+  // ── Local fallback: linear-trend forecast for PM2.5 ─────────
+  const localForecast = useMemo(() => {
+    const src = rows.slice(-48);
+    if (src.length < 6) return [];
+    const vals = src.map((r, i) => ({ x: i, y: Number(r.pm25 || 0) })).filter(p => p.y > 0);
+    const n = vals.length;
+    const sumX = vals.reduce((s, p) => s + p.x, 0);
+    const sumY = vals.reduce((s, p) => s + p.y, 0);
+    const sumXY = vals.reduce((s, p) => s + p.x * p.y, 0);
+    const sumX2 = vals.reduce((s, p) => s + p.x * p.x, 0);
+    const denom = n * sumX2 - sumX * sumX;
+    if (denom === 0) return [];
+    const slope = (n * sumXY - sumX * sumY) / denom;
+    const intercept = (sumY - slope * sumX) / n;
+    return Array.from({ length: 12 }, (_, i) => ({
+      step: i + 1,
+      forecast_value: Math.max(0, intercept + slope * (n + i)).toFixed(2),
+      upper: Math.max(0, (intercept + slope * (n + i)) * 1.12).toFixed(2),
+      lower: Math.max(0, (intercept + slope * (n + i)) * 0.88).toFixed(2),
+    }));
+  }, [rows]);
+
+  // ── Local fallback: Z-score anomaly detection ─────────────
+  const localAnomalies = useMemo(() => {
+    if (rows.length < 10) return [];
+    const found = [];
+    metrics.forEach(m => {
+      const vals = rows.map(r => Number(r[m.key] || 0)).filter(v => v > 0);
+      if (vals.length < 5) return;
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const std = Math.sqrt(vals.map(v => (v - mean) ** 2).reduce((a, b) => a + b, 0) / vals.length);
+      if (std === 0) return;
+      rows.forEach(row => {
+        const val = Number(row[m.key] || 0);
+        if (!val) return;
+        const zscore = (val - mean) / std;
+        if (Math.abs(zscore) > 2.5) {
+          found.push({ sensor: m.key, value: val, zscore: zscore.toFixed(2), mean: mean.toFixed(2), std: std.toFixed(2), detected_at: row.timestamp || new Date().toISOString() });
+        }
+      });
+    });
+    return found.sort((a, b) => Math.abs(b.zscore) - Math.abs(a.zscore)).slice(0, 10);
+  }, [rows]);
+
+  // ── Time-bucketed chart data ────────────────────────────────
+  const bucketedRows = useMemo(() => {
+    if (!rows.length) return [];
+    const bucketMs = timeframe === '24h' ? 3600000 : timeframe === '7d' ? 21600000 : 86400000;
+    const groups = {};
+    rows.forEach(row => {
+      const ts = new Date(row.timestamp).getTime();
+      if (isNaN(ts)) return;
+      const key = Math.floor(ts / bucketMs) * bucketMs;
+      if (!groups[key]) {
+        groups[key] = { _ts: key, _counts: {} };
+        metrics.forEach(m => { groups[key][m.key] = 0; groups[key]._counts[m.key] = 0; });
+      }
+      metrics.forEach(m => {
+        const v = Number(row[m.key] || 0);
+        if (v > 0) { groups[key][m.key] += v; groups[key]._counts[m.key]++; }
+      });
+    });
+    return Object.values(groups)
+      .sort((a, b) => a._ts - b._ts)
+      .map(g => {
+        const label = timeframe === '24h'
+          ? new Date(g._ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : timeframe === '7d'
+          ? new Date(g._ts).toLocaleDateString([], { weekday: 'short', hour: '2-digit' })
+          : new Date(g._ts).toLocaleDateString([], { month: 'short', day: 'numeric' });
+        const entry = { timestamp: label };
+        metrics.forEach(m => {
+          entry[m.key] = g._counts[m.key] > 0 ? Number((g[m.key] / g._counts[m.key]).toFixed(2)) : null;
+        });
+        return entry;
+      });
+  }, [rows, timeframe]);
+
   const pieData = metrics.map(m=>({ name:m.label, value: avg[m.key]||0, color:m.color }));
   
   const radarData = metrics.map(m => ({
@@ -195,6 +289,11 @@ export default function Analytics(){
     if (score >= 20) return 'Poor';
     return 'Hazardous';
   };
+
+  // Resolved data — prefer backend, fall back to local
+  const resolvedSummary = summary || localSummary;
+  const resolvedForecast = (forecast?.length ? forecast : localForecast);
+  const resolvedAnomalies = (anomalies?.length ? anomalies : localAnomalies);
 
   return (
     <div className="analytics-root">
@@ -309,21 +408,26 @@ export default function Analytics(){
       </div>
 
       <div className="analytics-panel" style={{marginBottom:16}}>
-        <h4 style={{margin:0, color:'var(--accent)'}}>📊 Historical Overview</h4>
+        <h4 style={{margin:0, color:'var(--accent)'}}>📊 Historical Overview
+          <span style={{fontSize:11,fontWeight:400,color:'rgba(255,255,255,0.4)',marginLeft:10}}>
+            {timeframe==='24h'?'Hourly buckets':timeframe==='7d'?'6-hour buckets':'Daily buckets'}
+          </span>
+        </h4>
         <div style={{display:'flex', gap:14, marginTop:12, alignItems:'center'}}>
           <div style={{flex:1}}>
             <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart data={rows}>
+              <ComposedChart data={bucketedRows}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
-                <XAxis dataKey="timestamp" stroke="rgba(255,255,255,0.5)" />
-                <YAxis stroke="rgba(255,255,255,0.5)" />
+                <XAxis dataKey="timestamp" stroke="rgba(255,255,255,0.5)" tick={{fontSize:10}} interval="preserveStartEnd" />
+                <YAxis stroke="rgba(255,255,255,0.5)" tick={{fontSize:10}} width={40}/>
                 <Tooltip 
-                  contentStyle={{background:'rgba(0,0,0,0.9)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:8}}
-                  labelStyle={{color:'#fff'}}
+                  contentStyle={{background:'rgba(0,10,30,0.95)', border:'1px solid rgba(0,229,160,0.2)', borderRadius:8, fontSize:12}}
+                  labelStyle={{color:'#00e5ff', fontWeight:600}}
+                  formatter={(v,n)=>[v!=null?Number(v).toFixed(2):'—', n]}
                 />
-                <Legend />
-                {metrics.slice(0,3).map(m=>(<Area key={m.key} type="monotone" dataKey={m.key} fill={m.color} fillOpacity={0.3} stroke={m.color}/>))}
-                {metrics.slice(3).map(m=>(<Line key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2} dot={false}/>))}
+                <Legend wrapperStyle={{fontSize:11}}/>
+                {metrics.slice(0,3).map(m=>(<Area key={m.key} type="monotone" dataKey={m.key} fill={m.color} fillOpacity={0.25} stroke={m.color} strokeWidth={2} dot={false} connectNulls/>))}
+                {metrics.slice(3).map(m=>(<Line key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2} dot={false} connectNulls/>))}
               </ComposedChart>
             </ResponsiveContainer>
           </div>
@@ -332,7 +436,7 @@ export default function Analytics(){
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={metrics.map(m=>({ name:m.label, value: avg[m.key]||0, threshold: m.threshold }))}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)"/>
-                <XAxis dataKey="name" stroke="rgba(255,255,255,0.5)" />
+                <XAxis dataKey="name" stroke="rgba(255,255,255,0.5)" tick={{fontSize:10}}/>
                 <YAxis stroke="rgba(255,255,255,0.5)" />
                 <Tooltip />
                 <Bar dataKey="value">
@@ -356,25 +460,33 @@ export default function Analytics(){
       </div>
 
       <div className="analytics-panel" style={{marginTop:16}}>
-        <h4 style={{color:'var(--accent)', marginTop:0}}>AI Summary</h4>
-        {summary ? (
-          <div style={{display:'flex', gap:20}}>
-            <div>Count: <b>{summary.count}</b></div>
-            <div>Min: <b>{summary.min}</b></div>
-            <div>Max: <b>{summary.max}</b></div>
-            <div>Avg: <b>{Number(summary.avg).toFixed(2)}</b></div>
-            <div>Generated: <b>{new Date(summary.generated_at).toLocaleString()}</b></div>
+        <h4 style={{color:'var(--accent)', marginTop:0}}>📋 AI Summary
+          {resolvedSummary?._local && <span style={{fontSize:10,color:'#f59e0b',marginLeft:8,fontWeight:400}}>locally computed</span>}
+        </h4>
+        {resolvedSummary ? (
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(120px,1fr))', gap:12}}>
+            {[['Data Points', resolvedSummary.count],['Min PM2.5',resolvedSummary.min+' µg/m³'],['Max PM2.5',resolvedSummary.max+' µg/m³'],['Avg PM2.5',Number(resolvedSummary.avg).toFixed(2)+' µg/m³'],['Generated',new Date(resolvedSummary.generated_at).toLocaleTimeString()]].map(([k,v])=>(
+              <div key={k} style={{textAlign:'center',padding:'12px 8px',background:'rgba(255,255,255,0.05)',borderRadius:8}}>
+                <div style={{fontSize:10,opacity:0.5,marginBottom:4,textTransform:'uppercase',letterSpacing:'0.06em'}}>{k}</div>
+                <div style={{fontSize:18,fontWeight:700,color:'var(--accent)'}}>{v}</div>
+              </div>
+            ))}
           </div>
-        ) : <div style={{opacity:0.7}}>No summary yet.</div>}
+        ) : <div style={{opacity:0.7,padding:12}}>No data available.</div>}
       </div>
 
       {/* ML Forecast */}
       <div className="analytics-panel" style={{marginTop:16}}>
         <h4 style={{color:'var(--accent)', marginTop:0}}>🔮 Machine Learning Forecast</h4>
-        {forecast?.length ? (
+        {resolvedForecast?.length ? (
           <div>
+            {localForecast.length > 0 && !forecast?.length && (
+              <div style={{fontSize:11,color:'#f59e0b',marginBottom:8,padding:'4px 8px',background:'rgba(245,158,11,0.1)',borderRadius:6,display:'inline-block'}}>
+                ⚡ Locally computed from {rows.length} readings (backend ML pipeline offline)
+              </div>
+            )}
             <ResponsiveContainer width="100%" height={250}>
-              <AreaChart data={forecast}>
+              <AreaChart data={resolvedForecast}>
                 <defs>
                   <linearGradient id="forecastGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#00e5ff" stopOpacity={0.8}/>
@@ -385,23 +497,25 @@ export default function Analytics(){
                 <XAxis dataKey="step" stroke="rgba(255,255,255,0.5)" label={{ value: 'Steps Ahead', position: 'insideBottom', offset: -5, fill: 'rgba(255,255,255,0.7)' }} />
                 <YAxis stroke="rgba(255,255,255,0.5)" />
                 <Tooltip contentStyle={{background:'rgba(0,0,0,0.9)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:8}} />
-                <Area type="monotone" dataKey="forecast_value" stroke="#00e5ff" fill="url(#forecastGradient)" strokeWidth={2} />
+                <Area type="monotone" dataKey="forecast_value" stroke="#00e5ff" fill="url(#forecastGradient)" strokeWidth={2} dot={false}/>
+                <Area type="monotone" dataKey="upper" stroke="rgba(0,229,255,0.3)" fill="rgba(0,229,255,0.05)" strokeDasharray="4 4" dot={false}/>
+                <Area type="monotone" dataKey="lower" stroke="rgba(0,229,255,0.3)" fill="rgba(0,229,255,0.05)" strokeDasharray="4 4" dot={false}/>
               </AreaChart>
             </ResponsiveContainer>
             <p style={{marginTop:8, fontSize:12, opacity:0.6, textAlign:'center'}}>
               🤖 AI model predicting future air quality trends based on historical patterns
             </p>
           </div>
-        ) : <div style={{opacity:0.7}}>No forecast data available. ML models need more historical data to generate predictions.</div>}
+        ) : <div style={{opacity:0.7,textAlign:'center',padding:20}}>Insufficient data for forecast (need at least 6 readings).</div>}
       </div>
 
       {/* Anomaly Detection */}
       <div className="analytics-panel" style={{marginTop:16}}>
         <h4 style={{color:'var(--accent)', marginTop:0}}>⚠️ AI Anomaly Detection</h4>
-        {anomalies?.length ? (
+        {resolvedAnomalies?.length ? (
           <div>
             <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:12}}>
-              {anomalies.map((a,i)=>{
+              {resolvedAnomalies.map((a,i)=>{
                 const zScore = Number(a.zscore || 0);
                 const severity = Math.abs(zScore) > 3 ? 'Critical' : Math.abs(zScore) > 2 ? 'High' : 'Medium';
                 const severityColor = Math.abs(zScore) > 3 ? '#dc2626' : Math.abs(zScore) > 2 ? '#f59e0b' : '#3b82f6';
@@ -470,34 +584,32 @@ export default function Analytics(){
       
       {/* AI Summary Statistics */}
       <div className="analytics-panel" style={{marginTop:16}}>
-        <h4 style={{color:'var(--accent)', marginTop:0}}>📊 ML Statistical Summary</h4>
-        {summary ? (
-          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:16}}>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>DATA POINTS</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#00e5ff'}}>{summary.count}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>MINIMUM</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#10b981'}}>{Number(summary.min).toFixed(1)}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>MAXIMUM</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#ef4444'}}>{Number(summary.max).toFixed(1)}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>MEAN (μ)</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#f59e0b'}}>{Number(summary.avg).toFixed(2)}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8, gridColumn:'span 2'}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>GENERATED AT</div>
-              <div style={{fontSize:18, fontWeight:'bold', color:'#9ca3af'}}>{new Date(summary.generated_at).toLocaleString()}</div>
-            </div>
+        <h4 style={{color:'var(--accent)', marginTop:0}}>📊 ML Statistical Summary — Per Metric
+          {!summary && <span style={{fontSize:10,color:'#f59e0b',marginLeft:8,fontWeight:400}}>locally computed</span>}
+        </h4>
+        {rows.length > 0 ? (
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12}}>
+            {metrics.map(m => {
+              const vals = rows.map(r=>Number(r[m.key]||0)).filter(v=>v>0);
+              if (!vals.length) return null;
+              const mean = vals.reduce((a,b)=>a+b,0)/vals.length;
+              const std = Math.sqrt(vals.map(v=>(v-mean)**2).reduce((a,b)=>a+b,0)/vals.length);
+              return (
+                <div key={m.key} style={{padding:14,background:'rgba(255,255,255,0.04)',borderRadius:10,borderTop:`3px solid ${m.color}`}}>
+                  <div style={{fontSize:11,fontWeight:700,color:m.color,marginBottom:8}}>{m.label}</div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:4,fontSize:12}}>
+                    <div><span style={{opacity:0.5}}>Mean: </span><b>{mean.toFixed(2)}</b></div>
+                    <div><span style={{opacity:0.5}}>Std: </span><b>{std.toFixed(2)}</b></div>
+                    <div><span style={{opacity:0.5}}>Min: </span><b>{Math.min(...vals).toFixed(2)}</b></div>
+                    <div><span style={{opacity:0.5}}>Max: </span><b>{Math.max(...vals).toFixed(2)}</b></div>
+                  </div>
+                  <div style={{marginTop:8,fontSize:10,opacity:0.5}}>{vals.length} readings</div>
+                </div>
+              );
+            })}
           </div>
         ) : (
-          <div style={{opacity:0.7, padding:20, textAlign:'center'}}>
-            Waiting for ML pipeline to generate statistical summary...
-          </div>
+          <div style={{opacity:0.5,padding:20,textAlign:'center'}}>No data loaded yet.</div>
         )}
       </div>
       
