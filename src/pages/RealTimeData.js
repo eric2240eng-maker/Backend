@@ -1,754 +1,427 @@
 // src/pages/RealTimeData.js
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import MetricCard from '../components/MetricCard';
 import { api, socket } from '../config/api';
-import { 
-  ResponsiveContainer, LineChart, Line, CartesianGrid, Tooltip, XAxis, YAxis, 
-  Legend, Brush
+import {
+  ResponsiveContainer, ComposedChart, AreaChart, Area, Line,
+  CartesianGrid, Tooltip, XAxis, YAxis, Legend, ReferenceLine
 } from 'recharts';
 
-const flattenReading = (payload) => (payload?.metrics
-  ? { ...payload.metrics, timestamp: payload.timestamp, location: payload.location }
-  : payload || {});
+/* ─── helpers ─────────────────────────────────────────────────── */
+const flatten = p => p?.metrics ? { ...p.metrics, timestamp: p.timestamp } : (p || {});
 
-// Calculate AQI from PM2.5
-const calculateAQI = (pm25) => {
-  if (pm25 <= 12) return Math.round((50 / 12) * pm25);
-  if (pm25 <= 35.4) return Math.round(((100 - 51) / (35.4 - 12.1)) * (pm25 - 12.1) + 51);
-  if (pm25 <= 55.4) return Math.round(((150 - 101) / (55.4 - 35.5)) * (pm25 - 35.5) + 101);
-  if (pm25 <= 150.4) return Math.round(((200 - 151) / (150.4 - 55.5)) * (pm25 - 55.5) + 151);
-  if (pm25 <= 250.4) return Math.round(((300 - 201) / (250.4 - 150.5)) * (pm25 - 150.5) + 201);
-  return Math.round(((500 - 301) / (500.4 - 250.5)) * (pm25 - 250.5) + 301);
+const calcAQI = pm25 => {
+  if (!pm25) return 0;
+  if (pm25 <= 12)    return Math.round((50/12)*pm25);
+  if (pm25 <= 35.4)  return Math.round(((100-51)/(35.4-12.1))*(pm25-12.1)+51);
+  if (pm25 <= 55.4)  return Math.round(((150-101)/(55.4-35.5))*(pm25-35.5)+101);
+  if (pm25 <= 150.4) return Math.round(((200-151)/(150.4-55.5))*(pm25-55.5)+151);
+  if (pm25 <= 250.4) return Math.round(((300-201)/(250.4-150.5))*(pm25-150.5)+201);
+  return Math.round(((500-301)/(500.4-250.5))*(pm25-250.5)+301);
 };
 
-const getAQICategory = (aqi) => {
-  if (aqi <= 50) return { label: 'Good', color: '#00e400' };
-  if (aqi <= 100) return { label: 'Moderate', color: '#ffff00' };
-  if (aqi <= 150) return { label: 'Unhealthy for Sensitive Groups', color: '#ff7e00' };
-  if (aqi <= 200) return { label: 'Unhealthy', color: '#ff0000' };
-  if (aqi <= 300) return { label: 'Very Unhealthy', color: '#8f3f97' };
-  return { label: 'Hazardous', color: '#7e0023' };
+const aqiInfo = aqi => {
+  if (aqi <= 50)  return { label:'Good',                     color:'#10b981', glow:'rgba(16,185,129,0.3)' };
+  if (aqi <= 100) return { label:'Moderate',                 color:'#f59e0b', glow:'rgba(245,158,11,0.3)' };
+  if (aqi <= 150) return { label:'Unhealthy for Sensitive',  color:'#f97316', glow:'rgba(249,115,22,0.3)' };
+  if (aqi <= 200) return { label:'Unhealthy',                color:'#ef4444', glow:'rgba(239,68,68,0.3)'  };
+  if (aqi <= 300) return { label:'Very Unhealthy',           color:'#8b5cf6', glow:'rgba(139,92,246,0.3)' };
+  return           { label:'Hazardous',                      color:'#7f1d1d', glow:'rgba(127,29,29,0.3)'  };
 };
 
-export default function RealTimeData(){
-  const [metrics, setMetrics] = useState({});
-  const [series, setSeries] = useState([]);
-  const [isServerConnected, setIsServerConnected] = useState(false);
-  const [isSensorActive, setIsSensorActive] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [updateCount, setUpdateCount] = useState(0);
-  const [alerts, setAlerts] = useState([]);
-  const [autoRefresh, setAutoRefresh] = useState(true);
-  const [showStats, setShowStats] = useState(true);
-  const [sensorHealth, setSensorHealth] = useState(null);
-  const [healthLoading, setHealthLoading] = useState(false);
+const fmtAge = ms => {
+  if (ms < 60000)  return `${Math.round(ms/1000)}s ago`;
+  if (ms < 3600000)return `${Math.round(ms/60000)}m ago`;
+  return `${Math.round(ms/3600000)}h ago`;
+};
 
-  // Calculate statistics
-  const stats = useMemo(() => {
-    if (series.length === 0) return null;
-    
-    const calculate = (key) => {
-      const values = series.map(s => s[key]).filter(v => v != null);
-      if (values.length === 0) return null;
-      
-      return {
-        current: values[values.length - 1],
-        min: Math.min(...values),
-        max: Math.max(...values),
-        avg: values.reduce((a, b) => a + b, 0) / values.length,
-        trend: values.length > 1 ? values[values.length - 1] - values[values.length - 2] : 0
-      };
-    };
+const METRICS_CFG = [
+  { key:'pm25',        label:'PM2.5',      unit:'µg/m³', color:'#ef4444', threshold:35.4  },
+  { key:'pm10',        label:'PM10',       unit:'µg/m³', color:'#f97316', threshold:154   },
+  { key:'pm1',         label:'PM1.0',      unit:'µg/m³', color:'#f59e0b', threshold:50    },
+  { key:'co',          label:'CO',         unit:'ppm',   color:'#8b5cf6', threshold:9     },
+  { key:'co2',         label:'CO₂',        unit:'ppm',   color:'#06b6d4', threshold:1000  },
+  { key:'temperature', label:'Temp',       unit:'°C',    color:'#00e5a0', threshold:null  },
+  { key:'humidity',    label:'Humidity',   unit:'%',     color:'#3b82f6', threshold:null  },
+  { key:'voc_index',   label:'VOC',        unit:'idx',   color:'#ec4899', threshold:250   },
+  { key:'nox_index',   label:'NOx',        unit:'idx',   color:'#a78bfa', threshold:250   },
+];
 
-    return {
-      pm1: calculate('pm1'),
-      pm25: calculate('pm25'),
-      pm10: calculate('pm10'),
-      co: calculate('co'),
-      co2: calculate('co2'),
-      o3: calculate('o3'),
-      temperature: calculate('temperature'),
-      humidity: calculate('humidity'),
-      voc_index: calculate('voc_index'),
-      nox_index: calculate('nox_index')
-    };
-  }, [series]);
+const BUCKET_SEC = 60; // 1-minute buckets
 
-  // Count active sensors (parameters with data)
-  const sensorKeys = ['pm1', 'pm25', 'pm10', 'co', 'co2', 'temperature', 'humidity', 'voc_index', 'nox_index'];
-  const activeSensors = useMemo(() => {
-    return sensorKeys.filter(key => metrics[key] != null).length;
-  }, [metrics]);
-  
-  const totalSensors = sensorKeys.length;
-
-  // Calculate AQI
-  const currentAQI = useMemo(() => {
-    if (!metrics.pm25) return null;
-    const aqi = calculateAQI(metrics.pm25);
-    return { value: aqi, ...getAQICategory(aqi) };
-  }, [metrics.pm25]);
-
-  // Check for threshold violations
-  const checkAlerts = (data) => {
-    const newAlerts = [];
-    const thresholds = {
-      pm1: { value: 50, label: 'PM1.0' },
-      pm25: { value: 35.4, label: 'PM2.5' },
-      pm10: { value: 154, label: 'PM10' },
-      co: { value: 9, label: 'CO' },
-      co2: { value: 1000, label: 'CO₂' },
-      voc_index: { value: 250, label: 'VOC Index' },
-      nox_index: { value: 250, label: 'NOx Index' }
-    };
-
-    Object.keys(thresholds).forEach(key => {
-      if (data[key] > thresholds[key].value) {
-        newAlerts.push({
-          id: Date.now() + key,
-          type: 'warning',
-          metric: thresholds[key].label,
-          value: data[key],
-          threshold: thresholds[key].value,
-          timestamp: new Date().toLocaleTimeString()
-        });
+/* ─── time-bucket aggregator ──────────────────────────────────── */
+function bucketSeries(raw) {
+  if (!raw.length) return [];
+  const groups = {};
+  raw.forEach(r => {
+    const key = Math.floor(r.ts / (BUCKET_SEC * 1000)) * BUCKET_SEC * 1000;
+    if (!groups[key]) groups[key] = { ts: key, _n: 0, aqi: 0 };
+    groups[key]._n++;
+    METRICS_CFG.forEach(m => {
+      if (r[m.key] != null) {
+        groups[key][m.key] = (groups[key][m.key] || 0) + Number(r[m.key]);
+        groups[key][`_c_${m.key}`] = (groups[key][`_c_${m.key}`] || 0) + 1;
       }
     });
+    groups[key].aqi += (r.aqi || 0);
+  });
+  return Object.values(groups).sort((a,b)=>a.ts-b.ts).map(g => {
+    const out = { ts: g.ts, aqi: +(g.aqi/g._n).toFixed(1) };
+    METRICS_CFG.forEach(m => {
+      const c = g[`_c_${m.key}`] || 0;
+      out[m.key] = c ? +(g[m.key]/c).toFixed(2) : null;
+    });
+    return out;
+  });
+}
 
-    if (newAlerts.length > 0) {
-      setAlerts(prev => [...newAlerts, ...prev].slice(0, 5)); // Keep last 5 alerts
-    }
-  };
+/* ─── styled sub-components ───────────────────────────────────── */
+const S = {
+  page:    { padding:'20px 24px', maxWidth:1440, margin:'0 auto', fontFamily:"'Inter',sans-serif" },
+  panel:   { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:14, padding:'18px 20px', marginBottom:16 },
+  btn:     (active,accent) => ({ padding:'7px 14px', borderRadius:8, border:`1px solid ${active?accent:'rgba(255,255,255,0.12)'}`, background:active?`${accent}22`:'transparent', color:active?accent:'rgba(255,255,255,0.65)', cursor:'pointer', fontSize:12, fontWeight:600, transition:'all .15s', fontFamily:'inherit' }),
+  chip:    (color) => ({ display:'inline-flex', alignItems:'center', gap:5, padding:'3px 10px', borderRadius:20, border:`1px solid ${color}55`, background:`${color}15`, color, fontSize:11, fontWeight:600 }),
+  dot:     (color,pulse) => ({ width:7, height:7, borderRadius:'50%', background:color, boxShadow:`0 0 6px ${color}`, animation:pulse?'rt-pulse 1.8s ease-in-out infinite':'none' }),
+};
 
+/* ═══════════════════════════════════════════════════════════════ */
+export default function RealTimeData() {
+  const [metrics, setMetrics]   = useState({});
+  const [rawSeries, setRaw]     = useState([]);
+  const [connected, setConn]    = useState(false);
+  const [sensorLive, setSensorLive] = useState(false);
+  const [lastTs, setLastTs]     = useState(null);   // Date object of last reading
+  const [age, setAge]           = useState(null);    // ms since last reading
+  const [updateCount, setCount] = useState(0);
+  const [autoRefresh, setAuto]  = useState(true);
+  const [alerts, setAlerts]     = useState([]);
+  const [chartMetric, setChartMetric] = useState('pm25');
+  const [showAll, setShowAll]   = useState(false);
+  const sensorTmo = useRef(null);
+  const ageTmo    = useRef(null);
+
+  /* live age counter */
   useEffect(() => {
-    let active = true;
-    let sensorTimeout;
+    ageTmo.current = setInterval(() => {
+      setAge(lastTs ? Date.now() - lastTs.getTime() : null);
+    }, 1000);
+    return () => clearInterval(ageTmo.current);
+  }, [lastTs]);
 
-    const seedLatest = async () => {
-      try {
-        const resp = await api.get('/api/sensor-data/latest');
-        if (!active || !resp?.data) return;
-        const flat = flattenReading(resp.data);
-        const ts = flat?.timestamp ? new Date(flat.timestamp).getTime() : Date.now();
-        setMetrics(prev => ({ ...prev, ...flat }));
-        setSeries(prev => [...prev.slice(-49), { ...flat, ts }]);
-        setLastUpdate(new Date());
-      } catch (err) {
-        console.error('Failed to load latest sensor reading:', err);
-      }
-    };
-
-    const seedData = async () => {
-      try {
-        const resp = await api.get('/api/sensor-data/latest');
-        if (!active || !resp?.data) return;
-        const flat = flattenReading(resp.data);
-        const ts = flat?.timestamp ? new Date(flat.timestamp).getTime() : Date.now();
-        const aqi = flat.pm25 ? calculateAQI(flat.pm25) : null;
-        setMetrics(prev => ({ ...prev, ...flat }));
-        setSeries(prev => [...prev.slice(-49), { ...flat, ts, aqi }]);
-        setLastUpdate(new Date());
-      } catch (err) {
-        console.error('Failed to load latest sensor reading:', err);
-      }
-    };
-    
-    seedData();
-    if (!socket.connected) socket.connect();
-
-    const handleConnect = () => setIsServerConnected(true);
-    const handleDisconnect = () => {
-      setIsServerConnected(false);
-      setIsSensorActive(false); 
-    };
-
-    const handleSensor = (payload) => {
-      if (!autoRefresh || !active) return;
-      
-      // Data received, mark sensor active and reset watchdog timer
-      setIsSensorActive(true);
-      clearTimeout(sensorTimeout);
-      sensorTimeout = setTimeout(() => {
-        if (active) setIsSensorActive(false);
-      }, 5000); 
-
-      const flat = flattenReading(payload);
-      const ts = flat?.timestamp ? new Date(flat.timestamp).getTime() : Date.now();
-      const aqi = flat.pm25 ? calculateAQI(flat.pm25) : null;
-      
-      setMetrics(prev => ({...prev, ...flat}));
-      setSeries(prev => [...prev.slice(-49), {...flat, ts, aqi}]);
-      setLastUpdate(new Date());
-      setUpdateCount(prev => prev + 1);
-      checkAlerts(flat);
-    };
-
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('sensorData', handleSensor);
-
-    if (socket.connected) setIsServerConnected(true);
-
-    return () => {
-      active = false;
-      clearTimeout(sensorTimeout);
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('sensorData', handleSensor);
-    };
+  const handleData = useCallback(payload => {
+    if (!autoRefresh) return;
+    const flat = flatten(payload);
+    const ts   = flat.timestamp ? new Date(flat.timestamp).getTime() : Date.now();
+    const aqi  = flat.pm25 ? calcAQI(flat.pm25) : null;
+    setMetrics(prev => ({ ...prev, ...flat }));
+    setRaw(prev => [...prev.slice(-299), { ...flat, ts, aqi }]);
+    setLastTs(new Date());
+    setSensorLive(true);
+    setCount(c => c+1);
+    clearTimeout(sensorTmo.current);
+    sensorTmo.current = setTimeout(() => setSensorLive(false), 8000);
+    // alerts
+    METRICS_CFG.filter(m => m.threshold && flat[m.key] > m.threshold).forEach(m => {
+      setAlerts(prev => [{
+        id: Date.now()+m.key, metric: m.label,
+        value: flat[m.key], threshold: m.threshold,
+        time: new Date().toLocaleTimeString()
+      }, ...prev].slice(0,5));
+    });
   }, [autoRefresh]);
 
-  // Fetch sensor health status
   useEffect(() => {
-    let active = true;
-    let healthInterval;
-
-    const fetchSensorHealth = async () => {
-      try {
-        setHealthLoading(true);
-        const resp = await api.get('/api/diagnostics/sensor-status');
-        if (active && resp?.data) {
-          setSensorHealth(resp.data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch sensor health:', err);
-      } finally {
-        if (active) setHealthLoading(false);
-      }
-    };
-
-    fetchSensorHealth();
-    // Refresh sensor health every 30 seconds
-    healthInterval = setInterval(fetchSensorHealth, 30000);
-
+    let alive = true;
+    api.get('/api/sensor-data/latest').then(r => {
+      if (!alive || !r?.data) return;
+      handleData(r.data);
+    }).catch(()=>{});
+    if (!socket.connected) socket.connect();
+    const onConn  = () => setConn(true);
+    const onDisc  = () => { setConn(false); setSensorLive(false); };
+    socket.on('connect',    onConn);
+    socket.on('disconnect', onDisc);
+    socket.on('sensorData', handleData);
+    if (socket.connected) setConn(true);
     return () => {
-      active = false;
-      clearInterval(healthInterval);
+      alive = false;
+      clearTimeout(sensorTmo.current);
+      socket.off('connect',    onConn);
+      socket.off('disconnect', onDisc);
+      socket.off('sensorData', handleData);
     };
-  }, []);
+  }, [handleData]);
 
-  // Export data functions
+  const bucketed = useMemo(() => bucketSeries(rawSeries), [rawSeries]);
+  const aqi      = useMemo(() => metrics.pm25 ? (() => { const v=calcAQI(metrics.pm25); return { value:v, ...aqiInfo(v) }; })() : null, [metrics.pm25]);
+
+  const stats = useMemo(() => {
+    if (!rawSeries.length) return {};
+    const out = {};
+    METRICS_CFG.forEach(m => {
+      const vals = rawSeries.map(r=>r[m.key]).filter(v=>v!=null);
+      if (!vals.length) return;
+      out[m.key] = {
+        min: Math.min(...vals).toFixed(2),
+        max: Math.max(...vals).toFixed(2),
+        avg: (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(2),
+      };
+    });
+    return out;
+  }, [rawSeries]);
+
   const exportCSV = () => {
-    const headers = ['Timestamp', 'PM1.0', 'PM2.5', 'PM10', 'CO', 'CO2', 'Temperature', 'Humidity', 'VOC Index', 'NOx Index'];
-    const rows = series.map(s => [
-      new Date(s.ts).toLocaleString(),
-      s.pm1 || '',
-      s.pm25 || '',
-      s.pm10 || '',
-      s.co || '',
-      s.co2 || '',
-      s.temperature || '',
-      s.humidity || '',
-      s.voc_index || '',
-      s.nox_index || ''
-    ]);
-    
-    const csv = [headers, ...rows].map(row => row.join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `realtime-data-${new Date().toISOString()}.csv`;
-    a.click();
+    const h = ['Timestamp','PM1','PM2.5','PM10','CO','CO2','Temp','Humidity','VOC','NOx','AQI'];
+    const rows = rawSeries.map(s=>[new Date(s.ts).toLocaleString(),s.pm1,s.pm25,s.pm10,s.co,s.co2,s.temperature,s.humidity,s.voc_index,s.nox_index,s.aqi]);
+    const blob = new Blob([[h,...rows].map(r=>r.join(',')).join('\n')],{type:'text/csv'});
+    Object.assign(document.createElement('a'),{href:URL.createObjectURL(blob),download:`airquality-${Date.now()}.csv`}).click();
   };
 
-  const exportJSON = () => {
-    const json = JSON.stringify(series, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `realtime-data-${new Date().toISOString()}.json`;
-    a.click();
-  };
-
-  const renderChart = () => {
-    return (
-      <LineChart
-        data={series}
-        syncId="realtime"
-      >
-        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-        <XAxis 
-          dataKey="ts" 
-          type="number" 
-          scale="time" 
-          domain={["auto","auto"]} 
-          tickFormatter={v=>new Date(v).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})} 
-        />
-        <YAxis width={52} tickLine={false} />
-        <Tooltip 
-          labelFormatter={v=>new Date(v).toLocaleString()}
-          formatter={(value) => value ? value.toFixed(1) : 'N/A'}
-        />
-        <Legend />
-        <Brush height={14} travellerWidth={8} />
-        <Line type="monotone" dataKey="aqi" stroke="#ff7300" strokeWidth={3} dot={false} activeDot={{ r: 5 }} name="AQI" />
-      </LineChart>
-    );
-  };
+  const cfg = METRICS_CFG.find(m=>m.key===chartMetric)||METRICS_CFG[0];
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1400px', margin: '0 auto' }}>
-      {/* Header Section */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between', 
-        alignItems: 'center', 
-        marginBottom: '20px',
-        flexWrap: 'wrap',
-        gap: '12px'
-      }}>
+    <div style={S.page}>
+      <style>{`
+        @keyframes rt-pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.3)} }
+        @keyframes rt-slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+        .rt-btn:hover { opacity:.85; transform:translateY(-1px); }
+      `}</style>
+
+      {/* ── Header ── */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12,marginBottom:18}}>
         <div>
-          <h2 style={{ margin: '0 0 8px 0', fontSize: '28px', fontWeight: '600' }}>
+          <div style={{fontSize:22,fontWeight:700,color:'#e8eef8',letterSpacing:'-.02em'}}>
             Real-Time Monitoring
-          </h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            {/* Server Status */}
-            <span style={{ 
-              fontSize: '14px', 
-              color: isServerConnected ? '#00e400' : '#ff0000',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}>
-              <span style={{ 
-                width: '8px', 
-                height: '8px', 
-                borderRadius: '50%', 
-                backgroundColor: isServerConnected ? '#00e400' : '#ff0000'
-              }}></span>
-              {isServerConnected ? 'Server Online' : 'Server Offline'}
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginTop:6,flexWrap:'wrap'}}>
+            {/* Server status */}
+            <span style={S.chip(connected?'#10b981':'#ef4444')}>
+              <span style={S.dot(connected?'#10b981':'#ef4444',false)}/>
+              {connected?'Server Online':'Server Offline'}
             </span>
-
-            {/* Sensor Status */}
-            <span style={{ 
-              fontSize: '14px', 
-              color: isSensorActive ? '#00b3ff' : '#ff9800',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px'
-            }}>
-              <span style={{ 
-                width: '8px', 
-                height: '8px', 
-                borderRadius: '50%', 
-                backgroundColor: isSensorActive ? '#00b3ff' : '#ff9800',
-                animation: isSensorActive ? 'pulse 2s infinite' : 'none'
-              }}></span>
-              {isSensorActive ? 'Receiving Data' : 'Waiting for Sensor...'}
+            {/* Sensor live */}
+            <span style={S.chip(sensorLive?'#00e5a0':'#f59e0b')}>
+              <span style={S.dot(sensorLive?'#00e5a0':'#f59e0b', sensorLive)}/>
+              {sensorLive?'Receiving Data':'Awaiting Sensor'}
             </span>
-
-            {lastUpdate && (
-              <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)' }}>
-                Last Update: {lastUpdate.toLocaleTimeString()}
-              </span>
-            )}
-            <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.5)' }}>
-              Updates: {updateCount}
+            {/* Updates */}
+            <span style={{fontSize:11,color:'rgba(255,255,255,0.35)'}}>
+              {updateCount} updates this session
             </span>
           </div>
         </div>
-
-        {/* Controls */}
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => setAutoRefresh(!autoRefresh)}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '6px',
-              border: '1px solid rgba(255,255,255,0.1)',
-              backgroundColor: autoRefresh ? '#00e400' : 'rgba(255,255,255,0.1)',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500',
-              transition: 'all 0.3s'
-            }}
-          >
-            {autoRefresh ? 'Pause' : 'Resume'}
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          <button className="rt-btn" style={S.btn(autoRefresh,'#00e5a0')} onClick={()=>setAuto(a=>!a)}>
+            {autoRefresh?'⏸ Pause':'▶ Resume'}
           </button>
-          <button
-            onClick={() => setShowStats(!showStats)}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '6px',
-              border: '1px solid rgba(255,255,255,0.1)',
-              backgroundColor: 'rgba(255,255,255,0.05)',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            {showStats ? 'Hide Stats' : 'Show Stats'}
-          </button>
-          <button
-            onClick={exportCSV}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '6px',
-              border: '1px solid rgba(255,255,255,0.1)',
-              backgroundColor: '#4CAF50',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            Export CSV
-          </button>
-          <button
-            onClick={exportJSON}
-            style={{
-              padding: '8px 16px',
-              borderRadius: '6px',
-              border: '1px solid rgba(255,255,255,0.1)',
-              backgroundColor: '#2196F3',
-              color: '#fff',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: '500'
-            }}
-          >
-            Export JSON
+          <button className="rt-btn" style={S.btn(false,'#06b6d4')} onClick={exportCSV}>
+            ⬇ CSV
           </button>
         </div>
       </div>
 
-      {/* Active Sensors */}
+      {/* ── LAST DATA RECEIVED BANNER ── */}
       <div style={{
-        backgroundColor: 'rgba(255,255,255,0.05)',
-        borderRadius: '12px',
-        padding: '16px 20px',
-        marginBottom: '20px',
-        border: '1px solid rgba(255,255,255,0.08)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '16px'
+        ...S.panel,
+        background: age == null ? 'rgba(255,255,255,0.04)' :
+                    age < 30000 ? 'rgba(16,185,129,0.08)' :
+                    age < 120000 ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)',
+        border: `1px solid ${age==null?'rgba(255,255,255,0.08)':age<30000?'rgba(16,185,129,0.25)':age<120000?'rgba(245,158,11,0.25)':'rgba(239,68,68,0.25)'}`,
+        display:'flex', alignItems:'center', gap:16, flexWrap:'wrap',
       }}>
-        <span style={{
-          width: '44px',
-          height: '44px',
-          borderRadius: '50%',
-          backgroundImage: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: '22px',
-          fontWeight: 'bold'
-        }}>
-          {activeSensors}/{totalSensors}
-        </span>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>Active Sensors</div>
-          <div style={{ fontSize: '12px', opacity: '0.7' }}>
-            {activeSensors} out of {totalSensors} sensors reporting data
-          </div>
-        </div>
-      </div>
-
-      {/* Sensor Health Status Panel */}
-      {sensorHealth && (
         <div style={{
-          backgroundColor: sensorHealth.status === 'HEALTHY' ? 'rgba(34, 197, 94, 0.1)' : 
-                          sensorHealth.status === 'WARNING' ? 'rgba(245, 158, 11, 0.1)' :
-                          'rgba(239, 68, 68, 0.1)',
-          borderRadius: '12px',
-          padding: '16px 20px',
-          marginBottom: '20px',
-          border: `1px solid ${sensorHealth.status === 'HEALTHY' ? '#22c55e' : 
-                            sensorHealth.status === 'WARNING' ? '#f59e0b' :
-                            '#ef4444'}`,
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '16px'
+          width:48, height:48, borderRadius:12, flexShrink:0,
+          background: age==null?'rgba(255,255,255,0.06)':age<30000?'rgba(16,185,129,0.2)':age<120000?'rgba(245,158,11,0.2)':'rgba(239,68,68,0.2)',
+          display:'flex', alignItems:'center', justifyContent:'center', fontSize:22,
         }}>
-          <div style={{
-            width: '44px',
-            height: '44px',
-            borderRadius: '50%',
-            backgroundColor: sensorHealth.status === 'HEALTHY' ? '#22c55e' : 
-                            sensorHealth.status === 'WARNING' ? '#f59e0b' :
-                            '#ef4444',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '24px',
-            flexShrink: 0
-          }}>
-            {sensorHealth.status === 'HEALTHY' ? '✅' : 
-             sensorHealth.status === 'WARNING' ? '⚠️' : '🔴'}
+          {age==null?'📡':age<30000?'✅':age<120000?'⏳':'🔴'}
+        </div>
+        <div style={{flex:1}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:'.07em',textTransform:'uppercase',
+            color:age==null?'rgba(255,255,255,0.4)':age<30000?'#10b981':age<120000?'#f59e0b':'#ef4444', marginBottom:3}}>
+            Last Data Received
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 'bold', marginBottom: '8px', fontSize: '16px' }}>
-              Sensor Health: {sensorHealth.status}
-            </div>
-            <div style={{ fontSize: '12px', opacity: '0.7', lineHeight: '1.5' }}>
-              <div>Last Update: {new Date(sensorHealth.lastUpdate).toLocaleTimeString()}</div>
-              <div>Data Age: {Math.floor(sensorHealth.dataAge)} minutes</div>
-              <div>Active: {sensorHealth.activeSensors}/{sensorHealth.totalCriticalSensors} critical sensors</div>
-              {sensorHealth.issueCount.total > 0 && (
-                <div style={{ marginTop: '8px', color: '#ef4444' }}>
-                  🔧 Issues Found: {sensorHealth.issueCount.critical} critical, {sensorHealth.issueCount.warning} warnings
-                </div>
-              )}
-            </div>
+          <div style={{fontSize:20,fontWeight:700,color:'#e8eef8'}}>
+            {lastTs ? fmtAge(age) : 'No data yet'}
           </div>
-          
-          {/* Sensor Status Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: '8px', minWidth: '300px' }}>
-            {Object.entries(sensorHealth.sensorStatus || {}).slice(0, 6).map(([sensor, status]) => (
-              <div key={sensor} style={{
-                padding: '8px',
-                borderRadius: '8px',
-                fontSize: '11px',
-                textAlign: 'center',
-                backgroundColor: status.status === 'OK' ? 'rgba(34, 197, 94, 0.2)' :
-                                status.status === 'INVALID' ? 'rgba(245, 158, 11, 0.2)' :
-                                status.status === 'MISSING' ? 'rgba(239, 68, 68, 0.2)' :
-                                'rgba(156, 163, 175, 0.2)',
-                border: `1px solid ${status.status === 'OK' ? '#22c55e' :
-                                  status.status === 'INVALID' ? '#f59e0b' :
-                                  status.status === 'MISSING' ? '#ef4444' :
-                                  '#9ca3af'}`
-              }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>{sensor}</div>
-                <div style={{
-                  color: status.status === 'OK' ? '#22c55e' :
-                       status.status === 'INVALID' ? '#f59e0b' :
-                       status.status === 'MISSING' ? '#ef4444' :
-                       '#9ca3af'
-                }}>
-                  {status.status === 'OK' ? '✓' : '✗'}
-                </div>
-                {status.value !== null && (
-                  <div style={{ fontSize: '10px', marginTop: '2px', opacity: 0.7 }}>
-                    {typeof status.value === 'number' ? status.value.toFixed(1) : status.value}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          
-          {/* Issues List */}
-          {sensorHealth.issues && sensorHealth.issues.length > 0 && (
-            <div style={{
-              backgroundColor: 'rgba(0,0,0,0.2)',
-              borderRadius: '8px',
-              padding: '12px',
-              minWidth: '300px',
-              maxHeight: '150px',
-              overflowY: 'auto'
-            }}>
-              <div style={{ fontWeight: 'bold', marginBottom: '8px', fontSize: '12px' }}>Issues:</div>
-              {sensorHealth.issues.slice(0, 4).map((issue, idx) => (
-                <div key={idx} style={{ fontSize: '11px', marginBottom: '4px', color: issue.severity === 'CRITICAL' ? '#ef4444' : '#f59e0b' }}>
-                  • {issue.message}
-                </div>
-              ))}
-              {sensorHealth.issues.length > 4 && (
-                <div style={{ fontSize: '11px', opacity: 0.7 }}>... and {sensorHealth.issues.length - 4} more</div>
-              )}
+          {lastTs && (
+            <div style={{fontSize:11,color:'rgba(255,255,255,0.4)',marginTop:2}}>
+              {lastTs.toLocaleString()} · {rawSeries.length} readings buffered
             </div>
           )}
         </div>
-      )}
-
-      {/* AQI Display */}
-      {currentAQI && (
-        <div style={{
-          backgroundColor: currentAQI.color,
-          color: '#fff',
-          padding: '20px',
-          borderRadius: '12px',
-          marginBottom: '20px',
-          boxShadow: '0 4px 6px rgba(0,0,0,0.1)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px'
-        }}>
-          <div>
-            <div style={{ fontSize: '16px', fontWeight: '500', marginBottom: '4px' }}>
-              Air Quality Index (AQI)
-            </div>
-            <div style={{ fontSize: '48px', fontWeight: '700' }}>
-              {currentAQI.value}
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '20px', fontWeight: '600' }}>
-              {currentAQI.label}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Alerts Section */}
-      {alerts.length > 0 && (
-        <div style={{ marginBottom: '20px' }}>
-          <h3 style={{ marginBottom: '12px', fontSize: '18px', fontWeight: '600' }}>
-            Recent Alerts
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {alerts.map(alert => (
-              <div
-                key={alert.id}
-                style={{
-                  backgroundColor: 'rgba(255,115,0,0.15)',
-                  border: '1px solid rgba(255,115,0,0.5)',
-                  borderRadius: '8px',
-                  padding: '12px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: '14px'
-                }}
-              >
-                <span>
-                  <strong>{alert.metric}</strong>: {alert.value.toFixed(2)} exceeds threshold of {alert.threshold}
-                </span>
-                <span style={{ color: 'rgba(255,255,255,0.5)' }}>{alert.timestamp}</span>
+        {/* Session stats */}
+        {rawSeries.length > 0 && (
+          <div style={{display:'flex',gap:16,flexWrap:'wrap'}}>
+            {[['PM2.5 Avg', stats.pm25?.avg+' µg/m³'], ['PM2.5 Max', stats.pm25?.max+' µg/m³'], ['Updates', updateCount]].map(([l,v])=>(
+              <div key={l} style={{textAlign:'center'}}>
+                <div style={{fontSize:18,fontWeight:700,color:'#e8eef8'}}>{v||'—'}</div>
+                <div style={{fontSize:10,color:'rgba(255,255,255,0.4)',textTransform:'uppercase',letterSpacing:'.06em'}}>{l}</div>
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* ── AQI Hero ── */}
+      {aqi && (
+        <div style={{
+          ...S.panel,
+          background:`linear-gradient(135deg,${aqi.color}22,${aqi.color}0a)`,
+          border:`1px solid ${aqi.color}44`,
+          boxShadow:`0 0 32px ${aqi.glow}`,
+          display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12,
+          animation:'rt-slideIn .3s ease',
+        }}>
+          <div>
+            <div style={{fontSize:11,fontWeight:700,letterSpacing:'.08em',textTransform:'uppercase',color:aqi.color,marginBottom:4}}>
+              Air Quality Index
+            </div>
+            <div style={{fontSize:52,fontWeight:800,color:'#e8eef8',lineHeight:1}}>{aqi.value}</div>
+          </div>
+          <div style={{textAlign:'right'}}>
+            <div style={{fontSize:20,fontWeight:700,color:aqi.color}}>{aqi.label}</div>
+            <div style={{fontSize:12,color:'rgba(255,255,255,0.4)',marginTop:4}}>
+              Based on PM2.5: {metrics.pm25} µg/m³
+            </div>
+          </div>
         </div>
       )}
 
-      {/* Main Metrics - All 9 Parameters */}
-      <div className="cards-grid" style={{ marginBottom: '20px' }}>
-        {/* Particulate Matter */}
-        <MetricCard 
-          title="PM1.0" 
-          value={metrics.pm1} 
-          unit="µg/m³"
-          trend={stats?.pm1?.trend}
-        />
-        <MetricCard 
-          title="PM2.5" 
-          value={metrics.pm25} 
-          unit="µg/m³"
-          trend={stats?.pm25?.trend}
-        />
-        <MetricCard 
-          title="PM10" 
-          value={metrics.pm10} 
-          unit="µg/m³"
-          trend={stats?.pm10?.trend}
-        />
-        
-        {/* Gases */}
-        <MetricCard 
-          title="CO" 
-          value={metrics.co} 
-          unit="ppm"
-          trend={stats?.co?.trend}
-        />
-        <MetricCard 
-          title="CO₂" 
-          value={metrics.co2} 
-          unit="ppm"
-          trend={stats?.co2?.trend}
-        />
-        
-        {/* Environmental */}
-        <MetricCard 
-          title="Temperature" 
-          value={metrics.temperature} 
-          unit="°C"
-          trend={stats?.temperature?.trend}
-        />
-        <MetricCard 
-          title="Humidity" 
-          value={metrics.humidity} 
-          unit="%"
-          trend={stats?.humidity?.trend}
-        />
-        
-        {/* VOC & NOx */}
-        <MetricCard 
-          title="VOC Index" 
-          value={metrics.voc_index} 
-          unit=""
-          trend={stats?.voc_index?.trend}
-        />
-        <MetricCard 
-          title="NOx Index" 
-          value={metrics.nox_index} 
-          unit=""
-          trend={stats?.nox_index?.trend}
-        />
+      {/* ── Alerts ── */}
+      {alerts.length > 0 && (
+        <div style={{...S.panel, borderColor:'rgba(239,68,68,0.25)', background:'rgba(239,68,68,0.06)', marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,textTransform:'uppercase',letterSpacing:'.07em',color:'#ef4444',marginBottom:10}}>
+            ⚠ Active Threshold Alerts
+          </div>
+          {alerts.map(a=>(
+            <div key={a.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 0',borderBottom:'1px solid rgba(255,255,255,0.05)',fontSize:13}}>
+              <span><strong style={{color:'#fca5a5'}}>{a.metric}</strong>: {Number(a.value).toFixed(1)} <span style={{color:'rgba(255,255,255,0.4)'}}>/ limit {a.threshold}</span></span>
+              <span style={{fontSize:10,color:'rgba(255,255,255,0.35)'}}>{a.time}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Metric cards ── */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:12,marginBottom:16}}>
+        {METRICS_CFG.map(m=>(
+          <MetricCard key={m.key} title={m.label} value={metrics[m.key]} unit={m.unit}
+            trend={rawSeries.length>1?(rawSeries[rawSeries.length-1][m.key]||0)-(rawSeries[rawSeries.length-2][m.key]||0):0}
+          />
+        ))}
       </div>
 
-      {/* Statistics Panel */}
-      {showStats && stats && (
-        <div style={{
-          backgroundColor: 'rgba(255,255,255,0.03)',
-          borderRadius: '12px',
-          padding: '20px',
-          marginBottom: '20px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-          border: '1px solid rgba(255,255,255,0.05)'
-        }}>
-          <h3 style={{ marginBottom: '16px', fontSize: '18px', fontWeight: '600' }}>
-            Session Statistics
-          </h3>
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-            gap: '16px' 
-          }}>
-            {Object.entries(stats).map(([key, stat]) => {
-              if (!stat) return null;
+      {/* ── Time-bucketed Chart ── */}
+      <div style={S.panel}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:10,marginBottom:16}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:'#e8eef8'}}>
+              {cfg.label} — {BUCKET_SEC}s Bucket Averages
+            </div>
+            <div style={{fontSize:11,color:'rgba(255,255,255,0.35)',marginTop:2}}>
+              {bucketed.length} buckets · {rawSeries.length} raw readings
+            </div>
+          </div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {METRICS_CFG.map(m=>(
+              <button key={m.key} className="rt-btn"
+                style={{...S.btn(chartMetric===m.key, m.color), fontSize:11, padding:'5px 10px'}}
+                onClick={()=>setChartMetric(m.key)}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <ResponsiveContainer width="100%" height={300}>
+          <AreaChart data={bucketed} margin={{top:5,right:10,left:0,bottom:5}}>
+            <defs>
+              <linearGradient id="rtGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={cfg.color} stopOpacity={0.35}/>
+                <stop offset="95%" stopColor={cfg.color} stopOpacity={0.02}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+            <XAxis dataKey="ts" type="number" scale="time" domain={['auto','auto']}
+              tickFormatter={v=>new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+              stroke="rgba(255,255,255,0.3)" tick={{fontSize:10}} interval="preserveStartEnd"/>
+            <YAxis stroke="rgba(255,255,255,0.3)" tick={{fontSize:10}} width={40}/>
+            <Tooltip
+              contentStyle={{background:'rgba(7,13,28,0.95)',border:`1px solid ${cfg.color}44`,borderRadius:8,fontSize:12}}
+              labelStyle={{color:'#00e5ff',fontWeight:600}}
+              labelFormatter={v=>new Date(v).toLocaleTimeString()}
+              formatter={(v,n)=>[v!=null?Number(v).toFixed(2):'—',n]}
+            />
+            {cfg.threshold && <ReferenceLine y={cfg.threshold} stroke="#ef4444" strokeDasharray="4 4"
+              label={{value:'Limit',fill:'#ef4444',fontSize:10,position:'right'}}/>}
+            <Area type="monotone" dataKey={cfg.key} stroke={cfg.color} fill="url(#rtGrad)"
+              strokeWidth={2} dot={false} connectNulls name={cfg.label} activeDot={{r:4}}/>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* ── AQI trend chart ── */}
+      <div style={S.panel}>
+        <div style={{fontSize:15,fontWeight:700,color:'#e8eef8',marginBottom:14}}>
+          AQI Trend — {BUCKET_SEC}s Buckets
+        </div>
+        <ResponsiveContainer width="100%" height={220}>
+          <AreaChart data={bucketed} margin={{top:5,right:10,left:0,bottom:5}}>
+            <defs>
+              <linearGradient id="aqiGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#f97316" stopOpacity={0.4}/>
+                <stop offset="95%" stopColor="#f97316" stopOpacity={0.02}/>
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
+            <XAxis dataKey="ts" type="number" scale="time" domain={['auto','auto']}
+              tickFormatter={v=>new Date(v).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+              stroke="rgba(255,255,255,0.3)" tick={{fontSize:10}} interval="preserveStartEnd"/>
+            <YAxis stroke="rgba(255,255,255,0.3)" tick={{fontSize:10}} width={40}/>
+            <Tooltip
+              contentStyle={{background:'rgba(7,13,28,0.95)',border:'1px solid rgba(249,115,22,0.3)',borderRadius:8,fontSize:12}}
+              labelStyle={{color:'#f97316',fontWeight:600}}
+              labelFormatter={v=>new Date(v).toLocaleTimeString()}
+              formatter={v=>[v!=null?Number(v).toFixed(0):'—','AQI']}
+            />
+            <ReferenceLine y={100} stroke="#f59e0b" strokeDasharray="4 4"
+              label={{value:'Moderate',fill:'#f59e0b',fontSize:9,position:'right'}}/>
+            <ReferenceLine y={150} stroke="#ef4444" strokeDasharray="4 4"
+              label={{value:'Unhealthy',fill:'#ef4444',fontSize:9,position:'right'}}/>
+            <Area type="monotone" dataKey="aqi" stroke="#f97316" fill="url(#aqiGrad)"
+              strokeWidth={2} dot={false} connectNulls name="AQI" activeDot={{r:4}}/>
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* ── Session stats table ── */}
+      {Object.keys(stats).length > 0 && (
+        <div style={S.panel}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
+            <div style={{fontSize:15,fontWeight:700,color:'#e8eef8'}}>Session Statistics</div>
+            <button className="rt-btn" style={S.btn(false,'#06b6d4')} onClick={()=>setShowAll(s=>!s)}>
+              {showAll?'Show Less':'Show All'}
+            </button>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:10}}>
+            {METRICS_CFG.filter((_,i)=>showAll||i<5).map(m=>{
+              const s=stats[m.key]; if(!s) return null;
               return (
-                <div key={key} style={{ 
-                  backgroundColor: 'rgba(255,255,255,0.05)', 
-                  padding: '12px', 
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.08)'
-                }}>
-                  <div style={{ fontWeight: '600', marginBottom: '8px', textTransform: 'uppercase', fontSize: '12px', color: 'rgba(255,255,255,0.5)' }}>
-                    {key.replace(/([A-Z])/g, ' $1').toUpperCase()}
-                  </div>
-                  <div style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                    <div>Current: <strong>{stat.current.toFixed(2)}</strong></div>
-                    <div>Min: {stat.min.toFixed(2)}</div>
-                    <div>Max: {stat.max.toFixed(2)}</div>
-                    <div>Avg: {stat.avg.toFixed(2)}</div>
-                  </div>
+                <div key={m.key} style={{padding:12,borderRadius:10,background:'rgba(255,255,255,0.04)',borderTop:`3px solid ${m.color}`}}>
+                  <div style={{fontSize:11,fontWeight:700,color:m.color,marginBottom:8,textTransform:'uppercase',letterSpacing:'.05em'}}>{m.label}</div>
+                  {[['Avg',s.avg],['Min',s.min],['Max',s.max]].map(([l,v])=>(
+                    <div key={l} style={{display:'flex',justifyContent:'space-between',fontSize:12,marginBottom:3}}>
+                      <span style={{color:'rgba(255,255,255,0.4)'}}>{l}</span>
+                      <strong style={{color:'#e8eef8'}}>{v} {m.unit}</strong>
+                    </div>
+                  ))}
                 </div>
               );
             })}
           </div>
         </div>
       )}
-
-      {/* Chart Section - AQI Only */}
-      <div className="charts-row">
-        <h3 style={{ marginBottom: '12px', fontSize: '18px', fontWeight: '600' }}>
-          Air Quality Index Trend 
-        </h3>
-        
-        <ResponsiveContainer width="100%" height={350}>
-          {renderChart()}
-        </ResponsiveContainer>
-      </div>
-
-      {/* Pulse Animation */}
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-        
-        @media (max-width: 768px) {
-          .cards-grid {
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }
