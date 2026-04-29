@@ -340,90 +340,155 @@ export default function Analytics(){
       </div>
 
       <div className="analytics-panel" style={{marginBottom:16}}>
-        <h4 style={{margin:0, color:'var(--accent)'}}>📊 Historical Overview</h4>
-        <div style={{display:'flex', gap:14, marginTop:12, alignItems:'center'}}>
-          <div style={{flex:1}}>
-            <ResponsiveContainer width="100%" height={280}>
-              <ComposedChart data={rows}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
-                <XAxis dataKey="timestamp" stroke="rgba(255,255,255,0.5)" />
-                <YAxis stroke="rgba(255,255,255,0.5)" />
-                <Tooltip 
-                  contentStyle={{background:'rgba(0,0,0,0.9)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:8}}
-                  labelStyle={{color:'#fff'}}
-                />
-                <Legend />
-                {metrics.slice(0,3).map(m=>(<Area key={m.key} type="monotone" dataKey={m.key} fill={m.color} fillOpacity={0.3} stroke={m.color}/>))}
-                {metrics.slice(3).map(m=>(<Line key={m.key} type="monotone" dataKey={m.key} stroke={m.color} strokeWidth={2} dot={false}/>))}
+        <h4 style={{margin:'0 0 4px 0', color:'var(--accent)'}}>📊 Historical Trends by Parameter Group</h4>
+        <p style={{margin:'0 0 16px 0', fontSize:12, opacity:0.5}}>Each group uses its own scale so values are readable and comparable</p>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:16}}>
+
+          {/* Particulate Matter */}
+          <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
+            <div style={{fontSize:12, fontWeight:700, color:'#00e5ff', marginBottom:8}}>🌫 Particulate Matter (µg/m³)</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={rows.slice(-50)}>
+                <defs>
+                  {[{k:'pm1',c:'#00d4ff'},{k:'pm25',c:'#00e5ff'},{k:'pm10',c:'#7d4bff'}].map(({k,c})=>(
+                    <linearGradient key={k} id={`g_${k}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={c} stopOpacity={0.5}/>
+                      <stop offset="95%" stopColor={c} stopOpacity={0}/>
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
+                <XAxis dataKey="timestamp" hide />
+                <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} unit="µg"/>
+                <Tooltip contentStyle={{background:'rgba(0,0,0,0.9)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8}}/>
+                <Legend wrapperStyle={{fontSize:11}}/>
+                <Area type="monotone" dataKey="pm1"  name="PM1.0" stroke="#00d4ff" fill="url(#g_pm1)"  strokeWidth={1.5}/>
+                <Area type="monotone" dataKey="pm25" name="PM2.5" stroke="#00e5ff" fill="url(#g_pm25)" strokeWidth={1.5}/>
+                <Area type="monotone" dataKey="pm10" name="PM10"  stroke="#7d4bff" fill="url(#g_pm10)" strokeWidth={1.5}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Gas Pollutants */}
+          <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
+            <div style={{fontSize:12, fontWeight:700, color:'#ff7a00', marginBottom:8}}>🧪 Gas Pollutants (ppm)</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={rows.slice(-50)}>
+                <defs>
+                  {[{k:'co',c:'#ff7a00'},{k:'o3',c:'#a78bfa'}].map(({k,c})=>(
+                    <linearGradient key={k} id={`g_${k}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={c} stopOpacity={0.5}/>
+                      <stop offset="95%" stopColor={c} stopOpacity={0}/>
+                    </linearGradient>
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
+                <XAxis dataKey="timestamp" hide />
+                <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} unit="ppm"/>
+                <Tooltip contentStyle={{background:'rgba(0,0,0,0.9)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8}}/>
+                <Legend wrapperStyle={{fontSize:11}}/>
+                <Area type="monotone" dataKey="co" name="CO" stroke="#ff7a00" fill="url(#g_co)" strokeWidth={1.5}/>
+                <Area type="monotone" dataKey="o3" name="O₃" stroke="#a78bfa" fill="url(#g_o3)" strokeWidth={1.5}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* CO₂ */}
+          <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
+            <div style={{fontSize:12, fontWeight:700, color:'#ff5722', marginBottom:8}}>💨 CO₂ Concentration (ppm)</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={rows.slice(-50)}>
+                <defs>
+                  <linearGradient id="g_co2" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#ff5722" stopOpacity={0.5}/>
+                    <stop offset="95%" stopColor="#ff5722" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
+                <XAxis dataKey="timestamp" hide />
+                <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} unit="ppm" domain={['auto','auto']}/>
+                <Tooltip contentStyle={{background:'rgba(0,0,0,0.9)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8}}/>
+                <Legend wrapperStyle={{fontSize:11}}/>
+                <Area type="monotone" dataKey="co2" name="CO₂" stroke="#ff5722" fill="url(#g_co2)" strokeWidth={2}/>
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Environmental */}
+          <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
+            <div style={{fontSize:12, fontWeight:700, color:'#ffb300', marginBottom:8}}>🌡 Environmental Conditions</div>
+            <ResponsiveContainer width="100%" height={200}>
+              <ComposedChart data={rows.slice(-50)}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>
+                <XAxis dataKey="timestamp" hide />
+                <YAxis yAxisId="left"  stroke="#ffb300" fontSize={10} unit="°C"/>
+                <YAxis yAxisId="right" orientation="right" stroke="#00bcd4" fontSize={10} unit="%"/>
+                <Tooltip contentStyle={{background:'rgba(0,0,0,0.9)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8}}/>
+                <Legend wrapperStyle={{fontSize:11}}/>
+                <Area yAxisId="left"  type="monotone" dataKey="temperature" name="Temp (°C)"  stroke="#ffb300" fill="#ffb30033" strokeWidth={1.5}/>
+                <Area yAxisId="right" type="monotone" dataKey="humidity"    name="Humidity (%)" stroke="#00bcd4" fill="#00bcd433" strokeWidth={1.5}/>
               </ComposedChart>
             </ResponsiveContainer>
           </div>
-          <div style={{width:320}}>
-            <h5 style={{color:'var(--accent)', marginTop:0}}>Average Levels</h5>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={metrics.map(m=>({ name:m.label, value: avg[m.key]||0, threshold: m.threshold }))}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)"/>
-                <XAxis dataKey="name" stroke="rgba(255,255,255,0.5)" />
-                <YAxis stroke="rgba(255,255,255,0.5)" />
-                <Tooltip />
-                <Bar dataKey="value">
-                  {metrics.map((m,i)=>(<Cell key={i} fill={m.color}/>))}
-                </Bar>
-                <Line type="monotone" dataKey="threshold" stroke="#ef4444" strokeDasharray="5 5"/>
-              </BarChart>
-            </ResponsiveContainer>
 
-            <h5 style={{color:'var(--accent)', marginTop:8}}>Pollutant Distribution</h5>
-            <ResponsiveContainer width="100%" height={160}>
-              <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" outerRadius={60} innerRadius={20} label>
-                  {pieData.map((p,i)=>(<Cell key={i} fill={p.color}/>))}
-                </Pie>
-                <Tooltip/>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
         </div>
       </div>
 
       <div className="analytics-panel" style={{marginTop:16}}>
-        <h4 style={{color:'var(--accent)', marginTop:0}}>AI Summary</h4>
-        {summary ? (
-          <div style={{display:'flex', gap:20}}>
-            <div>Count: <b>{summary.count}</b></div>
-            <div>Min: <b>{summary.min}</b></div>
-            <div>Max: <b>{summary.max}</b></div>
-            <div>Avg: <b>{Number(summary.avg).toFixed(2)}</b></div>
-            <div>Generated: <b>{new Date(summary.generated_at).toLocaleString()}</b></div>
+        <h4 style={{color:'var(--accent)', marginTop:0}}>📋 Data Summary</h4>
+        {rows.length > 0 ? (
+          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px,1fr))', gap:12}}>
+            <div style={{textAlign:'center', padding:14, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
+              <div style={{fontSize:11, opacity:0.6, marginBottom:4}}>DATA POINTS</div>
+              <div style={{fontSize:28, fontWeight:'bold', color:'#00e5ff'}}>{rows.length}</div>
+            </div>
+            {metrics.slice(0,6).map(m => {
+              const vals = rows.map(r=>Number(r[m.key]||0)).filter(v=>v>0);
+              if (!vals.length) return null;
+              const mn = Math.min(...vals);
+              const mx = Math.max(...vals);
+              const av = vals.reduce((a,b)=>a+b,0)/vals.length;
+              return (
+                <div key={m.key} style={{padding:12, background:'rgba(255,255,255,0.04)', borderRadius:8, borderTop:`3px solid ${m.color}`}}>
+                  <div style={{fontSize:11, fontWeight:700, color:m.color, marginBottom:6}}>{m.label}</div>
+                  <div style={{fontSize:11, opacity:0.7}}>Avg: <b style={{color:'#fff'}}>{av.toFixed(2)}</b></div>
+                  <div style={{fontSize:10, opacity:0.5, marginTop:2}}>↓{mn.toFixed(2)} — ↑{mx.toFixed(2)}</div>
+                </div>
+              );
+            })}
           </div>
-        ) : <div style={{opacity:0.7}}>No summary yet.</div>}
+        ) : <div style={{opacity:0.5, padding:16}}>Loading data…</div>}
       </div>
 
-      {/* ML Forecast */}
+      {/* ML Forecast - uses local moving-average predictions */}
       <div className="analytics-panel" style={{marginTop:16}}>
-        <h4 style={{color:'var(--accent)', marginTop:0}}>🔮 Machine Learning Forecast</h4>
-        {forecast?.length ? (
+        <h4 style={{color:'var(--accent)', marginTop:0}}>🔮 Next-Hour Predictions (Moving Average)</h4>
+        {predictions.length > 0 ? (
           <div>
-            <ResponsiveContainer width="100%" height={250}>
-              <AreaChart data={forecast}>
-                <defs>
-                  <linearGradient id="forecastGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#00e5ff" stopOpacity={0.8}/>
-                    <stop offset="95%" stopColor="#00e5ff" stopOpacity={0.1}/>
-                  </linearGradient>
-                </defs>
+            <ResponsiveContainer width="100%" height={280}>
+              <BarChart data={predictions} margin={{top:10,right:20,left:0,bottom:60}}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)"/>
-                <XAxis dataKey="step" stroke="rgba(255,255,255,0.5)" label={{ value: 'Steps Ahead', position: 'insideBottom', offset: -5, fill: 'rgba(255,255,255,0.7)' }} />
-                <YAxis stroke="rgba(255,255,255,0.5)" />
-                <Tooltip contentStyle={{background:'rgba(0,0,0,0.9)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:8}} />
-                <Area type="monotone" dataKey="forecast_value" stroke="#00e5ff" fill="url(#forecastGradient)" strokeWidth={2} />
-              </AreaChart>
+                <XAxis dataKey="metric" stroke="rgba(255,255,255,0.5)" angle={-35} textAnchor="end" interval={0} fontSize={11}/>
+                <YAxis stroke="rgba(255,255,255,0.5)" fontSize={11}/>
+                <Tooltip
+                  contentStyle={{background:'rgba(0,0,0,0.9)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:8}}
+                  formatter={(val, name) => [Number(val).toFixed(3), name]}
+                />
+                <Legend wrapperStyle={{paddingTop:16}}/>
+                <Bar dataKey="current"   name="Current"   fill="rgba(0,229,255,0.5)" stroke="#00e5ff" strokeWidth={1} radius={[4,4,0,0]}/>
+                <Bar dataKey="predicted" name="Predicted" fill="rgba(167,139,250,0.5)" stroke="#a78bfa" strokeWidth={1} radius={[4,4,0,0]}/>
+              </BarChart>
             </ResponsiveContainer>
-            <p style={{marginTop:8, fontSize:12, opacity:0.6, textAlign:'center'}}>
-              🤖 AI model predicting future air quality trends based on historical patterns
+            <p style={{marginTop:4, fontSize:11, opacity:0.5, textAlign:'center'}}>
+              Confidence range: {Math.min(...predictions.map(p=>Number(p.confidence)))}% – {Math.max(...predictions.map(p=>Number(p.confidence)))}% · Based on last 5 readings
             </p>
           </div>
-        ) : <div style={{opacity:0.7}}>No forecast data available. ML models need more historical data to generate predictions.</div>}
+        ) : (
+          <div style={{opacity:0.6, padding:20, textAlign:'center'}}>
+            <div style={{fontSize:32, marginBottom:8}}>📡</div>
+            Collecting data… predictions appear after 5 or more readings.
+          </div>
+        )}
       </div>
 
       {/* Anomaly Detection */}
@@ -499,36 +564,54 @@ export default function Analytics(){
         )}
       </div>
       
-      {/* AI Summary Statistics */}
+      {/* Statistical Summary — always computed from local data */}
       <div className="analytics-panel" style={{marginTop:16}}>
-        <h4 style={{color:'var(--accent)', marginTop:0}}>📊 ML Statistical Summary</h4>
-        {summary ? (
-          <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:16}}>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>DATA POINTS</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#00e5ff'}}>{summary.count}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>MINIMUM</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#10b981'}}>{Number(summary.min).toFixed(1)}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>MAXIMUM</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#ef4444'}}>{Number(summary.max).toFixed(1)}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>MEAN (μ)</div>
-              <div style={{fontSize:32, fontWeight:'bold', color:'#f59e0b'}}>{Number(summary.avg).toFixed(2)}</div>
-            </div>
-            <div style={{textAlign:'center', padding:16, background:'rgba(255,255,255,0.05)', borderRadius:8, gridColumn:'span 2'}}>
-              <div style={{fontSize:12, opacity:0.6, marginBottom:4}}>GENERATED AT</div>
-              <div style={{fontSize:18, fontWeight:'bold', color:'#9ca3af'}}>{new Date(summary.generated_at).toLocaleString()}</div>
-            </div>
+        <h4 style={{color:'var(--accent)', marginTop:0}}>📊 Per-Parameter Statistical Summary</h4>
+        {rows.length > 0 ? (
+          <div style={{overflowX:'auto'}}>
+            <table style={{width:'100%', borderCollapse:'collapse', fontSize:13}}>
+              <thead>
+                <tr style={{borderBottom:'1px solid rgba(255,255,255,0.1)'}}>
+                  {['Parameter','Unit','Samples','Min','Max','Mean','Std Dev','WHO Threshold'].map(h=>(
+                    <th key={h} style={{padding:'8px 12px', textAlign:'left', fontSize:11, opacity:0.6, fontWeight:600, textTransform:'uppercase', whiteSpace:'nowrap'}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {metrics.map(m => {
+                  const vals = rows.map(r=>Number(r[m.key]||0)).filter(v=>v>0);
+                  if (!vals.length) return null;
+                  const mn  = Math.min(...vals);
+                  const mx  = Math.max(...vals);
+                  const av  = vals.reduce((a,b)=>a+b,0)/vals.length;
+                  const std = Math.sqrt(vals.reduce((s,v)=>s+Math.pow(v-av,2),0)/vals.length);
+                  const exceeded = m.threshold && mx > m.threshold;
+                  return (
+                    <tr key={m.key} style={{borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
+                      <td style={{padding:'10px 12px', fontWeight:700, color:m.color}}>{m.label}</td>
+                      <td style={{padding:'10px 12px', opacity:0.5, fontSize:11}}>{m.unit}</td>
+                      <td style={{padding:'10px 12px'}}>{vals.length}</td>
+                      <td style={{padding:'10px 12px', color:'#10b981'}}>{mn.toFixed(3)}</td>
+                      <td style={{padding:'10px 12px', color: exceeded ? '#ef4444' : '#fff'}}>{mx.toFixed(3)}</td>
+                      <td style={{padding:'10px 12px', fontWeight:600}}>{av.toFixed(3)}</td>
+                      <td style={{padding:'10px 12px', opacity:0.7}}>±{std.toFixed(3)}</td>
+                      <td style={{padding:'10px 12px'}}>
+                        {m.threshold ? (
+                          <span style={{padding:'2px 8px', borderRadius:4, fontSize:11, fontWeight:700,
+                            background: exceeded ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)',
+                            color: exceeded ? '#ef4444' : '#10b981'}}>
+                            {exceeded ? `⚠ ${m.threshold}` : `✓ ${m.threshold}`}
+                          </span>
+                        ) : <span style={{opacity:0.4}}>—</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <div style={{opacity:0.7, padding:20, textAlign:'center'}}>
-            Waiting for ML pipeline to generate statistical summary...
-          </div>
+          <div style={{opacity:0.5, padding:20, textAlign:'center'}}>Loading statistics…</div>
         )}
       </div>
       

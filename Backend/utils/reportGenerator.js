@@ -1,21 +1,18 @@
 /**
- * Lightweight Report Generator - Returns formatted JSON/Text report
- * PDFKit removed due to installation issues - returns CLI-friendly text format
+ * Lightweight Report Generator - Returns formatted JSON report
+ * Handles both flat readings {pm1, pm25,...} and nested {metrics:{pm1,...}}
  */
 
 class ReportGenerator {
   constructor(readings, location = 'Lab Sensor A') {
     this.readings = readings;
-    this.location = location;
+    // Flatten nested metrics so we always work with {pm1, pm25, ..., timestamp}
+    this.flat = readings.map(r => ({
+      timestamp: r.timestamp,
+      ...(r.metrics || r),
+    }));
   }
 
-  /**
-   * Generate text report (no PDF dependencies)
-   * @param {string} granularity - 'hourly', 'daily', 'weekly', 'monthly', 'yearly'
-   * @param {Date} startDate
-   * @param {Date} endDate
-   * @returns {Object} Report data as JSON/text
-   */
   async generateReport(granularity, startDate, endDate) {
     const aggregatedData = this._aggregateByGranularity(granularity);
 
@@ -27,171 +24,148 @@ class ReportGenerator {
         period: `${startDate.toDateString()} to ${endDate.toDateString()}`,
         generated: new Date().toLocaleString(),
       },
-      executiveSummary: this._generateExecutiveSummary(aggregatedData),
-      pollutantAnalysis: this._generatePollutantAnalysis(aggregatedData),
-      environmental: this._generateEnvironmental(aggregatedData),
-      healthCompliance: this._generateHealthCompliance(aggregatedData),
-      sensorHealth: this._generateSensorHealth(),
+      executiveSummary:   this._generateExecutiveSummary(aggregatedData),
+      pollutantAnalysis:  this._generatePollutantAnalysis(),
+      environmental:      this._generateEnvironmental(),
+      healthCompliance:   this._generateHealthCompliance(),
+      sensorHealth:       this._generateSensorHealth(),
     };
   }
 
   _aggregateByGranularity(granularity) {
     const aggregated = {};
-
-    this.readings.forEach((reading) => {
-      const date = new Date(reading.timestamp);
+    this.flat.forEach((r) => {
+      const date = new Date(r.timestamp);
       let key;
-
-      if (granularity === 'hourly') {
-        key = date.toISOString().slice(0, 13);
-      } else if (granularity === 'daily') {
-        key = date.toISOString().slice(0, 10);
-      } else if (granularity === 'weekly') {
-        key = `Week ${Math.floor(date.getDate() / 7)}`;
-      } else if (granularity === 'monthly') {
-        key = date.toISOString().slice(0, 7);
-      } else if (granularity === 'yearly') {
-        key = date.getFullYear().toString();
-      }
-
-      if (!aggregated[key]) {
-        aggregated[key] = [];
-      }
-      aggregated[key].push(reading);
+      if      (granularity === 'hourly')  key = date.toISOString().slice(0, 13);
+      else if (granularity === 'daily')   key = date.toISOString().slice(0, 10);
+      else if (granularity === 'weekly')  key = `Week ${Math.ceil(date.getDate() / 7)}`;
+      else if (granularity === 'monthly') key = date.toISOString().slice(0, 7);
+      else if (granularity === 'yearly')  key = date.getFullYear().toString();
+      if (!aggregated[key]) aggregated[key] = [];
+      aggregated[key].push(r);
     });
-
     return aggregated;
   }
 
   _getStats(values) {
-    if (values.length === 0) return { min: 0, max: 0, mean: 0, median: 0, std: 0 };
-
+    if (!values.length) return { min: 0, max: 0, mean: 0, median: 0, std: 0 };
     const sorted = [...values].sort((a, b) => a - b);
-    const min = sorted[0];
-    const max = sorted[sorted.length - 1];
-    const mean = values.reduce((a, b) => a + b) / values.length;
+    const mean   = values.reduce((a, b) => a + b, 0) / values.length;
     const median = sorted[Math.floor(sorted.length / 2)];
-
-    const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-    const std = Math.sqrt(variance);
-
-    return { min, max, mean, median, std };
+    const std    = Math.sqrt(values.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / values.length);
+    return { min: sorted[0], max: sorted[sorted.length - 1], mean, median, std };
   }
 
   _generateExecutiveSummary(aggregatedData) {
-    const allAQI = this.readings.map((r) => r.aqi).filter((v) => v !== undefined);
-    const avgAQI = allAQI.length ? (allAQI.reduce((a, b) => a + b) / allAQI.length).toFixed(1) : 'N/A';
-    const maxAQI = allAQI.length ? Math.max(...allAQI) : 'N/A';
-    const minAQI = allAQI.length ? Math.min(...allAQI) : 'N/A';
+    const totalReadings = this.flat.length;
+    const periods = Object.keys(aggregatedData).length || 1;
+
+    // Use PM2.5 as the headline pollutant for summary
+    const pm25vals = this.flat.map(r => Number(r.pm25 || 0)).filter(v => v > 0);
+    const avgPM25  = pm25vals.length ? (pm25vals.reduce((a,b)=>a+b,0)/pm25vals.length).toFixed(1) : 'N/A';
+    const maxPM25  = pm25vals.length ? Math.max(...pm25vals).toFixed(1) : 'N/A';
 
     return {
-      averageAQI: avgAQI,
-      peakAQI: maxAQI,
-      lowestAQI: minAQI,
-      totalReadings: this.readings.length,
-      dataCompleteness: `${((this.readings.length / (24 * Object.keys(aggregatedData).length)) * 100).toFixed(0)}%`,
+      totalReadings,
+      dataCompleteness:   `${Math.min(100, Math.round((totalReadings / (periods * 12)) * 100))}%`,
+      averagePM25:        `${avgPM25} µg/m³`,
+      peakPM25:           `${maxPM25} µg/m³`,
+      monitoringPeriods:  periods,
     };
   }
 
-  _generatePollutantAnalysis(aggregatedData) {
-    const pollutants = ['pm1', 'pm25', 'pm10', 'co', 'co2', 'o3', 'no2'];
+  _generatePollutantAnalysis() {
+    const pollutants = [
+      { key: 'pm1',  label: 'PM1.0',  unit: 'µg/m³' },
+      { key: 'pm25', label: 'PM2.5',  unit: 'µg/m³' },
+      { key: 'pm10', label: 'PM10',   unit: 'µg/m³' },
+      { key: 'co',   label: 'CO',     unit: 'ppm'   },
+      { key: 'co2',  label: 'CO₂',    unit: 'ppm'   },
+      { key: 'o3',   label: 'O₃',     unit: 'ppm'   },
+    ];
+
     const analysis = {};
-
-    pollutants.forEach((pollutant) => {
-      const values = this.readings.map((r) => r[pollutant]).filter((v) => v !== undefined && v !== null);
-      if (values.length === 0) return;
-
-      const stats = this._getStats(values);
-      analysis[pollutant.toUpperCase()] = {
-        min: stats.min.toFixed(2),
-        max: stats.max.toFixed(2),
-        average: stats.mean.toFixed(2),
-        median: stats.median.toFixed(2),
-        standardDeviation: stats.std.toFixed(2),
-        samples: values.length,
+    pollutants.forEach(({ key, label, unit }) => {
+      const values = this.flat
+        .map(r => Number(r[key]))
+        .filter(v => !isNaN(v) && v > 0);
+      if (!values.length) return;
+      const s = this._getStats(values);
+      analysis[`${label} (${unit})`] = {
+        min:               s.min.toFixed(3),
+        max:               s.max.toFixed(3),
+        average:           s.mean.toFixed(3),
+        median:            s.median.toFixed(3),
+        standardDeviation: s.std.toFixed(3),
+        samples:           values.length,
       };
     });
-
     return analysis;
   }
 
-  _generateEnvironmental(aggregatedData) {
+  _generateEnvironmental() {
     const params = [
       { key: 'temperature', label: 'Temperature (°C)' },
-      { key: 'humidity', label: 'Humidity (%)' },
-      { key: 'voc_index', label: 'VOC Index' },
-      { key: 'nox_index', label: 'NOx Index' },
+      { key: 'humidity',    label: 'Humidity (%)'     },
+      { key: 'voc_index',   label: 'VOC Index'        },
+      { key: 'nox_index',   label: 'NOx Index'        },
     ];
-
-    const environmental = {};
+    const env = {};
     params.forEach(({ key, label }) => {
-      const values = this.readings.map((r) => r[key]).filter((v) => v !== undefined && v !== null);
-      if (values.length === 0) return;
-
-      const stats = this._getStats(values);
-      environmental[label] = {
-        min: stats.min.toFixed(2),
-        max: stats.max.toFixed(2),
-        average: stats.mean.toFixed(2),
+      const values = this.flat
+        .map(r => Number(r[key]))
+        .filter(v => !isNaN(v) && v > 0);
+      if (!values.length) return;
+      const s = this._getStats(values);
+      env[label] = {
+        min:     s.min.toFixed(2),
+        max:     s.max.toFixed(2),
+        average: s.mean.toFixed(2),
       };
     });
-
-    return environmental;
+    return env;
   }
 
-  _generateHealthCompliance(aggregatedData) {
-    const healthCategories = {
-      Good: 0,
-      Moderate: 0,
-      'Unhealthy for Sensitive': 0,
-      Unhealthy: 0,
-      'Very Unhealthy': 0,
-      Hazardous: 0,
-    };
-
-    this.readings.forEach((r) => {
-      const aqi = r.aqi;
-      if (aqi <= 50) healthCategories.Good++;
-      else if (aqi <= 100) healthCategories.Moderate++;
-      else if (aqi <= 150) healthCategories['Unhealthy for Sensitive']++;
-      else if (aqi <= 200) healthCategories.Unhealthy++;
-      else if (aqi <= 300) healthCategories['Very Unhealthy']++;
-      else healthCategories.Hazardous++;
+  _generateHealthCompliance() {
+    // Use PM2.5 to infer AQI category
+    const categories = { Good: 0, Moderate: 0, 'Unhealthy (Sensitive)': 0, Unhealthy: 0, 'Very Unhealthy': 0, Hazardous: 0 };
+    this.flat.forEach(r => {
+      const v = Number(r.pm25 || 0);
+      if      (v <= 12)   categories.Good++;
+      else if (v <= 35.4) categories.Moderate++;
+      else if (v <= 55.4) categories['Unhealthy (Sensitive)']++;
+      else if (v <= 150.4)categories.Unhealthy++;
+      else if (v <= 250.4)categories['Very Unhealthy']++;
+      else                categories.Hazardous++;
     });
-
+    const total = this.flat.length || 1;
     const breakdown = {};
-    Object.entries(healthCategories).forEach(([category, count]) => {
-      const percentage = ((count / this.readings.length) * 100).toFixed(1);
-      breakdown[category] = { count, percentage: `${percentage}%` };
+    Object.entries(categories).forEach(([cat, count]) => {
+      breakdown[cat] = { count, percentage: `${((count / total) * 100).toFixed(1)}%` };
     });
-
     return breakdown;
   }
 
   _generateSensorHealth() {
-    const recentReadings = this.readings.slice(-10);
-    const recentTimestamps = recentReadings.map((r) => new Date(r.timestamp).getTime());
-    const timeDiffMs = Math.max(...recentTimestamps) - Math.min(...recentTimestamps);
-    const timeDiffMin = Math.ceil(timeDiffMs / 60000);
+    const recent = this.flat.slice(-10);
+    if (!recent.length) return { status: 'No data', missingFields: 'N/A' };
 
-    const nullFields = [];
-    recentReadings.forEach((r) => {
-      Object.keys(r).forEach((key) => {
-        if ((r[key] === null || r[key] === undefined) && !nullFields.includes(key)) {
-          nullFields.push(key);
-        }
-      });
-    });
+    const times = recent.map(r => new Date(r.timestamp).getTime()).filter(t => !isNaN(t));
+    const spanMin = times.length > 1
+      ? Math.ceil((Math.max(...times) - Math.min(...times)) / 60000)
+      : 0;
+
+    const allKeys = ['pm1','pm25','pm10','co','co2','o3','temperature','humidity','voc_index','nox_index'];
+    const missing = allKeys.filter(k => recent.some(r => r[k] == null || r[k] === ''));
 
     return {
-      lastReadingSpan: `${timeDiffMin} minutes`,
-      latestTimestamp: recentReadings[recentReadings.length - 1]?.timestamp,
-      missingFields: nullFields.length > 0 ? nullFields : 'None',
-      status: nullFields.length > 0 ? '⚠ Warnings' : '✓ Healthy',
+      lastReadingSpan: `${spanMin} minutes`,
+      latestTimestamp: recent[recent.length - 1]?.timestamp || 'N/A',
+      missingFields:   missing.length ? missing.join(', ') : 'None',
+      status:          missing.length ? '⚠ Some sensors missing data' : '✓ All sensors healthy',
     };
   }
 }
-
-module.exports = ReportGenerator;
 
 module.exports = ReportGenerator;
