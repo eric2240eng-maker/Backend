@@ -8,15 +8,16 @@ import {
 } from 'recharts';
 
 const metrics = [
-  { label: 'PM1.0', key: 'pm1', color: '#00d4ff', threshold: 50, unit: 'µg/m³' },
-  { label: 'PM2.5', key: 'pm25', color: '#00e5ff', threshold: 35, unit: 'µg/m³' },
-  { label: 'PM10', key: 'pm10', color: '#7d4bff', threshold: 150, unit: 'µg/m³' },
-  { label: 'CO', key: 'co', color: '#ff7a00', threshold: 9, unit: 'ppm' },
-  { label: 'CO₂', key: 'co2', color: '#ff5722', threshold: 1000, unit: 'ppm' },
-  { label: 'Temperature', key: 'temperature', color: '#ffb300', threshold: 40, unit: '°C' },
-  { label: 'Humidity', key: 'humidity', color: '#00bcd4', threshold: 80, unit: '%' },
-  { label: 'VOC Index', key: 'voc_index', color: '#9c27b0', threshold: 250, unit: '' },
-  { label: 'NOx Index', key: 'nox_index', color: '#e91e63', threshold: 250, unit: '' },
+  { label: 'PM1.0',       key: 'pm1',        color: '#00d4ff', threshold: 50,   unit: 'µg/m³' },
+  { label: 'PM2.5',       key: 'pm25',       color: '#00e5ff', threshold: 35.4, unit: 'µg/m³' },
+  { label: 'PM10',        key: 'pm10',       color: '#7d4bff', threshold: 150,  unit: 'µg/m³' },
+  { label: 'CO',          key: 'co',         color: '#ff7a00', threshold: 9,    unit: 'ppm' },
+  { label: 'CO₂',         key: 'co2',        color: '#ff5722', threshold: 1000, unit: 'ppm' },
+  { label: 'O₃',          key: 'o3',         color: '#a78bfa', threshold: 0.07, unit: 'ppm' },
+  { label: 'Temperature', key: 'temperature',color: '#ffb300', threshold: 40,   unit: '°C' },
+  { label: 'Humidity',    key: 'humidity',   color: '#00bcd4', threshold: 80,   unit: '%' },
+  { label: 'VOC Index',   key: 'voc_index',  color: '#9c27b0', threshold: 250,  unit: '' },
+  { label: 'NOx Index',   key: 'nox_index',  color: '#e91e63', threshold: 250,  unit: '' },
 ];
 
 export default function Analytics(){
@@ -138,19 +139,49 @@ export default function Analytics(){
     load();
   },[timeframe, calculateCorrelations]);
   
-  // Calculate overall air quality health score
+  // ── WHO-weighted Air Quality Health Score (0–100) ────────────
+  // Each pollutant gets a sub-score (100 = well within limits,
+  // 0 = far above hazardous threshold) then weighted by health impact.
   const calculateHealthScore = (avgs) => {
-    let score = 100;
-    metrics.forEach(m => {
-      const value = avgs[m.key] || 0;
-      const threshold = m.threshold;
-      if (value > threshold) {
-        const penalty = Math.min(30, ((value - threshold) / threshold) * 20);
-        score -= penalty;
-      }
+    // WHO-based breakpoints: [good, moderate, bad, hazardous]
+    const breakpoints = {
+      pm25:        [15,   25,    55.4,   150.4],  // µg/m³ (WHO 2021 AQG)
+      pm10:        [45,   75,    155,    354],     // µg/m³
+      pm1:         [20,   35,    60,     100],     // estimated
+      co:          [4,    9,     15,     30],      // ppm
+      co2:         [800,  1000,  1500,   2000],    // ppm
+      o3:          [0.03, 0.05,  0.07,   0.12],   // ppm (WHO 8h: 0.05)
+      voc_index:   [100,  150,   250,    400],
+      nox_index:   [100,  150,   250,    400],
+      temperature: [18,   28,    35,     40],     // optimal 18-26 °C
+      humidity:    [30,   70,    80,     95],      // optimal 40-60%
+    };
+    // Health impact weights (must sum to 1.0)
+    const weights = {
+      pm25: 0.25, pm10: 0.15, pm1: 0.05,
+      co: 0.15,   co2: 0.10,  o3: 0.15,
+      voc_index: 0.07, nox_index: 0.05,
+      temperature: 0.02, humidity: 0.01,
+    };
+    let weightedSum  = 0;
+    let totalWeight  = 0;
+    Object.entries(weights).forEach(([key, weight]) => {
+      const val = avgs[key];
+      if (val == null || val === 0) return;   // skip missing
+      const bp = breakpoints[key];
+      let subScore;
+      if (val <= bp[0])       subScore = 100;
+      else if (val <= bp[1])  subScore = 75 - ((val - bp[0]) / (bp[1] - bp[0])) * 25;
+      else if (val <= bp[2])  subScore = 50 - ((val - bp[1]) / (bp[2] - bp[1])) * 25;
+      else if (val <= bp[3])  subScore = 25 - ((val - bp[2]) / (bp[3] - bp[2])) * 25;
+      else                    subScore = 0;
+      weightedSum += Math.max(0, subScore) * weight;
+      totalWeight += weight;
     });
-    return Math.max(0, Math.round(score));
+    if (totalWeight === 0) return 0;
+    return Math.max(0, Math.min(100, Math.round(weightedSum / totalWeight)));
   };
+
   
   // Simple moving average prediction
   const generatePredictions = (data) => {
@@ -221,8 +252,8 @@ export default function Analytics(){
             <div style={{fontSize:20, color:getHealthColor(healthScore), opacity:0.9}}>
               {getHealthLabel(healthScore)}
             </div>
-            <p style={{marginTop:12, opacity:0.7, fontSize:14}}>
-              AI-powered health assessment based on all pollutant levels and WHO guidelines
+          <p style={{marginTop:12, opacity:0.7, fontSize:14}}>
+              WHO-weighted health score: PM2.5 (25%) · PM10 (15%) · O₃ (15%) · CO (15%) · CO₂ (10%) · VOC (7%) · NOx (5%) · Temp/Humidity (3%)
             </p>
           </div>
           <div style={{flex:1}}>

@@ -14,16 +14,18 @@ import {
 
 // Color palette from aqmrg-frontend
 const metrics = [
-  { label: 'PM1.0', key: 'pm1', stroke: '#ec4899', unit: 'µg/m³', threshold: 50, category: 'air' },
-  { label: 'PM2.5', key: 'pm25', stroke: '#f43f5e', unit: 'µg/m³', threshold: 35, category: 'air' },
-  { label: 'PM10', key: 'pm10', stroke: '#fbbf24', unit: 'µg/m³', threshold: 150, category: 'air' },
-  { label: 'CO', key: 'co', stroke: '#f59e0b', unit: 'ppm', threshold: 9, category: 'air' },
-  { label: 'CO₂', key: 'co2', stroke: '#10b981', unit: 'ppm', threshold: 1000, category: 'air' },
-  { label: 'Temperature', key: 'temperature', stroke: '#3b82f6', unit: '°C', threshold: null, category: 'env' },
-  { label: 'Humidity', key: 'humidity', stroke: '#06b6d4', unit: '%', threshold: null, category: 'env' },
-  { label: 'VOC Index', key: 'voc_index', stroke: '#8b5cf6', unit: '', threshold: 250, category: 'air' },
-  { label: 'NOx Index', key: 'nox_index', stroke: '#ec4899', unit: '', threshold: 250, category: 'air' }
+  { label: 'PM1.0',       key: 'pm1',        stroke: '#ec4899', unit: 'µg/m³', threshold: 50,   category: 'air' },
+  { label: 'PM2.5',       key: 'pm25',       stroke: '#f43f5e', unit: 'µg/m³', threshold: 35,   category: 'air' },
+  { label: 'PM10',        key: 'pm10',       stroke: '#fbbf24', unit: 'µg/m³', threshold: 150,  category: 'air' },
+  { label: 'CO',          key: 'co',         stroke: '#f59e0b', unit: 'ppm',   threshold: 9,    category: 'air' },
+  { label: 'CO₂',         key: 'co2',        stroke: '#10b981', unit: 'ppm',   threshold: 1000, category: 'air' },
+  { label: 'O₃',          key: 'o3',         stroke: '#a78bfa', unit: 'ppm',   threshold: 0.07, category: 'air' },
+  { label: 'Temperature', key: 'temperature',stroke: '#3b82f6', unit: '°C',    threshold: null, category: 'env' },
+  { label: 'Humidity',    key: 'humidity',   stroke: '#06b6d4', unit: '%',     threshold: null, category: 'env' },
+  { label: 'VOC Index',   key: 'voc_index',  stroke: '#8b5cf6', unit: '',      threshold: 250,  category: 'air' },
+  { label: 'NOx Index',   key: 'nox_index',  stroke: '#ec4899', unit: '',      threshold: 250,  category: 'air' },
 ];
+
 
 export default function HistoricalData() {
   const [timeBucket, setTimeBucket] = useState('daily'); // Granularity: hourly, daily, weekly, monthly, yearly

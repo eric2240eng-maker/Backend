@@ -5,7 +5,7 @@ import { api, socket } from "../config/api";
 
 const LIMITS = {
   pm1: 50, pm25: 35.4, pm10: 150,
-  co: 9, co2: 1000,
+  co: 9, co2: 1000, o3: 0.07,
   temperature: 40, humidity: 90,
   voc_index: 250, nox_index: 250,
 };
@@ -30,6 +30,7 @@ const METRICS_LIST = [
   { label: "PM10",        key: "pm10",         unit: "µg/m³" },
   { label: "CO",          key: "co",           unit: "ppm" },
   { label: "CO₂",         key: "co2",          unit: "ppm" },
+  { label: "O₃",          key: "o3",           unit: "ppm" },
   { label: "Temperature", key: "temperature",  unit: "°C" },
   { label: "Humidity",    key: "humidity",     unit: "%" },
   { label: "VOC",         key: "voc_index",    unit: "index" },
