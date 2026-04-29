@@ -9,9 +9,7 @@ app.use(express.json());
 
 // Backend URL from environment variable or default
 // Default to Render backend (stable) instead of Railway backend (timing out)
-const BACKEND_URL = process.env.TARGET_URL || 
-                   process.env.BACKEND_URL || 
-                   'https://airquality-dashboard-and-ai-analytics.onrender.com';
+const BACKEND_URL = 'https://airquality-dashboard-and-ai-analytics.onrender.com';
 
 // Health check - handles both Railway's probe and root requests silently
 app.get(['/', '/health'], (req, res) => {
