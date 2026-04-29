@@ -129,7 +129,41 @@ export default function Analytics(){
         ]);
         setSummary(sumRes?.data || null);
         setForecast(Array.isArray(fcRes?.data?.points) ? fcRes.data.points : []);
-        setAnomalies(Array.isArray(anRes?.data) ? anRes.data : []);
+
+        // ── Local Z-score anomaly detection ──────────────────────
+        // Augment backend anomalies with locally-computed ones from the fetched data
+        const backendAnomalies = Array.isArray(anRes?.data) ? anRes.data : [];
+        const localAnomalies = [];
+        metrics.forEach(m => {
+          const vals = flat.map(d => Number(d[m.key] || 0)).filter(v => v > 0);
+          if (vals.length < 5) return;
+          const mean = vals.reduce((a,b) => a+b,0) / vals.length;
+          const std  = Math.sqrt(vals.reduce((s,v) => s+Math.pow(v-mean,2),0)/vals.length);
+          if (std === 0) return;
+          flat.forEach((d, i) => {
+            const val = Number(d[m.key] || 0);
+            if (!val) return;
+            const z = (val - mean) / std;
+            if (Math.abs(z) >= 2) {
+              localAnomalies.push({
+                sensor:      m.key,
+                value:       val,
+                zscore:      z.toFixed(2),
+                mean:        mean.toFixed(2),
+                std:         std.toFixed(2),
+                detected_at: d.timestamp || new Date().toISOString(),
+                source:      'local',
+              });
+            }
+          });
+        });
+        // Sort by absolute Z-score, deduplicate by metric, take top 12
+        const allAnomalies = [...backendAnomalies, ...localAnomalies]
+          .sort((a,b) => Math.abs(Number(b.zscore)) - Math.abs(Number(a.zscore)))
+          .slice(0, 12);
+        setAnomalies(allAnomalies);
+        // ───────────────────────────────────────────────────────
+
         setModelMetrics(Array.isArray(metricsRes?.data) ? metricsRes.data : []);
         setPipelineHealth(healthRes?.data || null);
       }catch(e){
@@ -346,7 +380,7 @@ export default function Analytics(){
 
           {/* Particulate Matter */}
           <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
-            <div style={{fontSize:12, fontWeight:700, color:'#00e5ff', marginBottom:8}}>🌫 Particulate Matter (µg/m³)</div>
+            <div style={{fontSize:12, fontWeight:700, color:'#00e5ff', marginBottom:8}}>Particulate Matter (µg/m³)</div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rows.slice(-50)}>
                 <defs>
@@ -371,7 +405,7 @@ export default function Analytics(){
 
           {/* Gas Pollutants */}
           <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
-            <div style={{fontSize:12, fontWeight:700, color:'#ff7a00', marginBottom:8}}>🧪 Gas Pollutants (ppm)</div>
+            <div style={{fontSize:12, fontWeight:700, color:'#ff7a00', marginBottom:8}}>Gas Pollutants (ppm)</div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rows.slice(-50)}>
                 <defs>
@@ -395,7 +429,7 @@ export default function Analytics(){
 
           {/* CO₂ */}
           <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
-            <div style={{fontSize:12, fontWeight:700, color:'#ff5722', marginBottom:8}}>💨 CO₂ Concentration (ppm)</div>
+            <div style={{fontSize:12, fontWeight:700, color:'#ff5722', marginBottom:8}}>CO₂ Concentration (ppm)</div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={rows.slice(-50)}>
                 <defs>
@@ -416,7 +450,7 @@ export default function Analytics(){
 
           {/* Environmental */}
           <div style={{background:'rgba(255,255,255,0.03)', borderRadius:10, padding:12}}>
-            <div style={{fontSize:12, fontWeight:700, color:'#ffb300', marginBottom:8}}>🌡 Environmental Conditions</div>
+            <div style={{fontSize:12, fontWeight:700, color:'#ffb300', marginBottom:8}}>Environmental Conditions</div>
             <ResponsiveContainer width="100%" height={200}>
               <ComposedChart data={rows.slice(-50)}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)"/>

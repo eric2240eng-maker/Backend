@@ -334,10 +334,16 @@ export default function HistoricalData() {
       }
 
       doc.save(`air-quality-report-${reportGranularity}-${Date.now()}.pdf`);
-      alert('✅ PDF Downloaded Successfully!');
+      alert('PDF downloaded successfully!');
     } catch (err) {
       console.error('Report generation error:', err);
-      alert('Failed to generate report: ' + (err.response?.data?.error || err.message));
+      const status = err.response?.status;
+      const msg    = err.response?.data?.error || err.message;
+      if (status === 404) {
+        alert('No sensor data found for the selected date range.\n\nTip: Select a range that includes dates when the Arduino was actively sending data.');
+      } else {
+        alert('Failed to generate report: ' + msg);
+      }
     } finally {
       setReportLoading(false);
     }
@@ -486,7 +492,7 @@ export default function HistoricalData() {
         backdropFilter: 'blur(10px)'
       }}>
         <h3 style={{ margin: '0 0 16px 0', fontSize: '1.1rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 10 }}>
-          📊 Generate PDF Report
+          Generate PDF Report
         </h3>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 16 }}>
@@ -586,7 +592,7 @@ export default function HistoricalData() {
                 opacity: reportLoading ? 0.6 : 1
               }}
             >
-              {reportLoading ? '⏳ Generating...' : '📥 Download PDF'}
+              {reportLoading ? 'Generating...' : 'Download PDF'}
             </button>
           </div>
         </div>

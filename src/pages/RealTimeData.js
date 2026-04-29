@@ -49,13 +49,6 @@ export default function RealTimeData() {
   const [alerts,          setAlerts]          = useState([]);
   const [autoRefresh,     setAutoRefresh]     = useState(true);
   const [sensorHealth,    setSensorHealth]    = useState(null);
-  const [tick,            setTick]            = useState(0);
-
-  // re-render every second so "time ago" stays fresh
-  useEffect(() => {
-    const t = setInterval(() => setTick(n => n + 1), 1000);
-    return () => clearInterval(t);
-  }, []);
 
   // ── Statistics ───────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -116,11 +109,13 @@ export default function RealTimeData() {
         const resp = await api.get('/api/sensor-data/latest');
         if (!active || !resp?.data) return;
         const flat = flattenReading(resp.data);
+        // Use the actual server timestamp from the payload
         const ts   = flat?.timestamp ? new Date(flat.timestamp).getTime() : Date.now();
         const aqi  = flat.pm25 ? calculateAQI(flat.pm25) : null;
         setMetrics(prev => ({ ...prev, ...flat }));
         setSeries(prev  => [...prev.slice(-49), { ...flat, ts, aqi }]);
-        setLastUpdate(new Date());
+        // Store actual server timestamp so the card shows when Arduino sent the data
+        setLastUpdate(flat?.timestamp ? new Date(flat.timestamp) : new Date());
       } catch (err) { console.error('Seed error:', err); }
     };
 
@@ -140,7 +135,8 @@ export default function RealTimeData() {
       const aqi  = flat.pm25 ? calculateAQI(flat.pm25) : null;
       setMetrics(prev => ({ ...prev, ...flat }));
       setSeries(prev  => [...prev.slice(-49), { ...flat, ts, aqi }]);
-      setLastUpdate(new Date());
+      // Use actual server timestamp
+      setLastUpdate(flat?.timestamp ? new Date(flat.timestamp) : new Date());
       setUpdateCount(prev => prev + 1);
       checkAlerts(flat);
     };
@@ -199,7 +195,24 @@ export default function RealTimeData() {
     boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
   };
 
-  const agoStr = timeAgo(lastUpdate);
+  // Format the server timestamp for display
+  const formatServerTime = (date) => {
+    if (!date) return null;
+    const now  = Date.now();
+    const sec  = Math.floor((now - date.getTime()) / 1000);
+    let ago;
+    if (sec < 60)        ago = `${sec}s ago`;
+    else if (sec < 3600) ago = `${Math.floor(sec / 60)}m ago`;
+    else if (sec < 86400)ago = `${Math.floor(sec / 3600)}h ago`;
+    else                 ago = `${Math.floor(sec / 86400)}d ago`;
+    return {
+      date: date.toLocaleDateString(undefined, { weekday:'short', year:'numeric', month:'short', day:'numeric' }),
+      time: date.toLocaleTimeString(undefined, { hour:'2-digit', minute:'2-digit', second:'2-digit' }),
+      ago,
+    };
+  };
+
+  const serverTime = formatServerTime(lastUpdate);
 
   // ── Render ───────────────────────────────────────────────────
   return (
@@ -247,40 +260,45 @@ export default function RealTimeData() {
               borderRadius:'8px', border:'1px solid rgba(0,229,160,0.5)',
               background: autoRefresh ? 'rgba(0,229,160,0.12)' : 'rgba(255,255,255,0.05)',
               color: autoRefresh ? '#00e5a0' : 'rgba(255,255,255,0.6)', cursor:'pointer', fontSize:'13px', fontWeight:'600' }}>
-            {autoRefresh ? '⏸ Pause' : '▶ Resume'}
+            {autoRefresh ? 'Pause' : 'Resume'}
           </button>
           <button onClick={exportCSV}
             style={{ display:'inline-flex', alignItems:'center', gap:'6px', padding:'8px 16px',
               borderRadius:'8px', border:'1px solid rgba(255,255,255,0.1)',
               background:'rgba(255,255,255,0.05)', color:'rgba(255,255,255,0.7)',
               cursor:'pointer', fontSize:'13px', fontWeight:'600' }}>
-            ↓ CSV
+            Export CSV
           </button>
         </div>
       </div>
 
-      {/* ── LAST DATA RECEIVED card (screenshot style) ── */}
+      {/* LAST DATA RECEIVED card */}
       <div style={{ ...cardStyle, borderColor: lastUpdate ? 'rgba(255,152,0,0.3)' : 'rgba(255,255,255,0.08)',
         display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'16px' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'16px' }}>
-          {/* Hourglass icon */}
           <div style={{ width:'46px', height:'46px', borderRadius:'12px',
             background:'linear-gradient(135deg,#b45309,#92400e)',
-            display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', flexShrink:0 }}>
-            ⏳
+            display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
           </div>
           <div>
             <div style={{ fontSize:'11px', fontWeight:'700', letterSpacing:'0.1em',
               textTransform:'uppercase', color:'#ff9800', marginBottom:'4px' }}>
               Last Data Received
             </div>
-            <div style={{ fontSize:'28px', fontWeight:'700', lineHeight:1 }}>
-              {agoStr || '—'}
-            </div>
-            {lastUpdate && (
-              <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.45)', marginTop:'4px' }}>
-                {lastUpdate.toLocaleString()} · {series.length} reading{series.length !== 1 ? 's' : ''} buffered
-              </div>
+            {serverTime ? (
+              <>
+                <div style={{ fontSize:'24px', fontWeight:'700', lineHeight:1 }}>
+                  {serverTime.time}
+                </div>
+                <div style={{ fontSize:'12px', color:'rgba(255,255,255,0.55)', marginTop:'4px' }}>
+                  {serverTime.date} &nbsp;&middot;&nbsp; {serverTime.ago} &nbsp;&middot;&nbsp; {series.length} reading{series.length !== 1 ? 's' : ''} buffered
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize:'20px', fontWeight:'700', color:'rgba(255,255,255,0.3)' }}>No data yet</div>
             )}
           </div>
         </div>
