@@ -145,8 +145,14 @@ app.post("/api/sensor-data", async (req, res) => {
       return res.status(400).json({ error: "Invalid or incomplete payload" });
     }
 
+    // Normalize location: Arduino fallback may send an object { name, latitude, longitude }
+    const rawLoc = payload.location;
+    const locationStr = (rawLoc && typeof rawLoc === 'object')
+      ? (rawLoc.name || 'Nairobi')
+      : (rawLoc || 'Nairobi');
+
     const savedDoc = await new Reading({
-      location: payload.location || "Nairobi",
+      location: locationStr,
       metrics: payload.metrics || {},
       timestamp: new Date()
     }).save();
@@ -178,8 +184,14 @@ app.post("/api/airdata", async (req, res) => {
       return res.status(400).json({ error: "Invalid or incomplete payload" });
     }
 
+    // Normalize location: Arduino fallback may send an object { name, latitude, longitude }
+    const rawLoc = payload.location;
+    const locationStr = (rawLoc && typeof rawLoc === 'object')
+      ? (rawLoc.name || 'Nairobi')
+      : (rawLoc || 'Nairobi');
+
     const savedDoc = await new Reading({
-      location: payload.location || "Nairobi",
+      location: locationStr,
       metrics: payload.metrics || {},
       timestamp: new Date()
     }).save();
