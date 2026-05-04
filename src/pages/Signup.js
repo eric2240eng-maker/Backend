@@ -60,15 +60,13 @@ const Signup = () => {
       setSuccess(res.data?.message || 'Account created! You can now log in.');
       setForm({ name: '', email: '', password: '' });
     } catch (err) {
-      if (err.message === 'Network Error') {
-        setError('Cannot reach server. Please try again.');
-        return;
-      }
       const status = err.response?.status;
       const msg    = err.response?.data?.message;
-      if (status === 409) setError('This email is already registered.');
-      else if (msg)       setError(msg);
-      else                setError('Signup failed. Please try again.');
+      if (status === 409)                  setError('This email is already registered.');
+      else if (msg)                        setError(msg);
+      else if (err.code === 'ERR_NETWORK') setError('Cannot reach server. Check your connection.');
+      else if (err.message === 'Network Error') setError('Cannot reach server. Check your connection.');
+      else                                 setError(`Signup failed: ${err.message || 'Please try again.'}`);
     } finally {
       setLoading(false);
     }
@@ -105,7 +103,12 @@ const Signup = () => {
 
         {success ? (
           <div style={styles.successBox}>
-            <div style={{ fontSize:'32px', marginBottom:'12px' }}>✅</div>
+            <div style={{ marginBottom:'12px', display:'flex', justifyContent:'center' }}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="#00e5a0" strokeWidth="2"/>
+                <path d="M7 12l3.5 3.5L17 8" stroke="#00e5a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
             <div style={{ fontWeight:'700', fontSize:'16px', marginBottom:'6px' }}>Account Created!</div>
             <div style={{ fontSize:'13px', color:'rgba(255,255,255,0.6)', marginBottom:'20px' }}>{success}</div>
             <Link to="/login" style={styles.btnPrimaryLink}>Go to Login</Link>
@@ -116,7 +119,12 @@ const Signup = () => {
             <div style={styles.fieldGroup}>
               <label style={styles.label} htmlFor="su-name">Full name</label>
               <div style={styles.inputWrapper}>
-                <span style={styles.inputIcon}>👤</span>
+                <span style={styles.inputIcon}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </span>
                 <input id="su-name" name="name" type="text" autoComplete="name"
                   value={form.name} onChange={handleChange} placeholder="Your name"
                   style={styles.input}
@@ -129,7 +137,12 @@ const Signup = () => {
             <div style={styles.fieldGroup}>
               <label style={styles.label} htmlFor="su-email">Email address</label>
               <div style={styles.inputWrapper}>
-                <span style={styles.inputIcon}>✉</span>
+                <span style={styles.inputIcon}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M2 8l10 7 10-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </span>
                 <input id="su-email" name="email" type="email" autoComplete="email"
                   value={form.email} onChange={handleChange} placeholder="you@example.com"
                   style={styles.input}
@@ -142,7 +155,12 @@ const Signup = () => {
             <div style={styles.fieldGroup}>
               <label style={styles.label} htmlFor="su-password">Password</label>
               <div style={styles.inputWrapper}>
-                <span style={styles.inputIcon}>🔐</span>
+                <span style={styles.inputIcon}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                    <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </span>
                 <input id="su-password" name="password" type={showPw ? 'text' : 'password'}
                   autoComplete="new-password" value={form.password} onChange={handleChange}
                   placeholder="At least 6 characters"
@@ -152,7 +170,17 @@ const Signup = () => {
                 <button type="button" onClick={() => setShowPw(!showPw)}
                   aria-label={showPw ? 'Hide password' : 'Show password'}
                   style={styles.eyeBtn}>
-                  {showPw ? '🙈' : '👁️'}
+                  {showPw
+                    ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        <line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      </svg>
+                    : <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2"/>
+                        <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/>
+                      </svg>
+                  }
                 </button>
               </div>
 
@@ -176,7 +204,12 @@ const Signup = () => {
             {/* Error */}
             {error && (
               <div style={styles.errorBox}>
-                <span>⚠</span> {error}
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}>
+                  <circle cx="12" cy="12" r="10" stroke="#fca5a5" strokeWidth="2"/>
+                  <line x1="12" y1="8" x2="12" y2="12" stroke="#fca5a5" strokeWidth="2" strokeLinecap="round"/>
+                  <circle cx="12" cy="16" r="1" fill="#fca5a5"/>
+                </svg>
+                {error}
               </div>
             )}
 
@@ -318,10 +351,12 @@ const styles = {
   },
   inputIcon: {
     padding: '0 10px 0 14px',
-    fontSize: '15px',
     opacity: 0.5,
     pointerEvents: 'none',
     flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    color: '#e8eef8',
   },
   input: {
     flex: 1,
@@ -339,12 +374,14 @@ const styles = {
     border: 'none',
     cursor: 'pointer',
     padding: '0 12px',
-    fontSize: '16px',
     opacity: 0.6,
     position: 'absolute',
     right: 0,
     top: '50%',
     transform: 'translateY(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    color: '#e8eef8',
   },
   errorBox: {
     display: 'flex',

@@ -80,7 +80,12 @@ const Login = () => {
           <div style={styles.fieldGroup}>
             <label style={styles.label} htmlFor="login-email">Email address</label>
             <div style={styles.inputWrapper}>
-              <span style={styles.inputIcon}>✉</span>
+              <span style={styles.inputIcon}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                  <rect x="2" y="4" width="20" height="16" rx="2" stroke="currentColor" strokeWidth="2"/>
+                  <path d="M2 8l10 7 10-7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+              </span>
               <input
                 id="login-email"
                 name="email"
@@ -100,7 +105,12 @@ const Login = () => {
           <div style={styles.fieldGroup}>
             <label style={styles.label} htmlFor="login-password">Password</label>
             <div style={styles.inputWrapper}>
-              <span style={styles.inputIcon}>🔐</span>
+              <span style={styles.inputIcon}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                  <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="2"/>
+                  <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                </svg>
+              </span>
               <input
                 id="login-password"
                 name="password"
@@ -116,7 +126,17 @@ const Login = () => {
               <button type="button" onClick={() => setShowPassword(!showPassword)}
                 aria-label={showPassword ? 'Hide password' : 'Show password'}
                 style={styles.eyeBtn}>
-                {showPassword ? '🙈' : '👁️'}
+                {showPassword
+                  ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                      <line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                    </svg>
+                  : <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" strokeWidth="2"/>
+                      <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2"/>
+                    </svg>
+                }
               </button>
             </div>
           </div>
@@ -124,7 +144,12 @@ const Login = () => {
           {/* Error */}
           {error && (
             <div style={styles.errorBox}>
-              <span>⚠</span> {error}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" style={{ flexShrink:0 }}>
+                <circle cx="12" cy="12" r="10" stroke="#fca5a5" strokeWidth="2"/>
+                <line x1="12" y1="8" x2="12" y2="12" stroke="#fca5a5" strokeWidth="2" strokeLinecap="round"/>
+                <circle cx="12" cy="16" r="1" fill="#fca5a5"/>
+              </svg>
+              {error}
             </div>
           )}
 
@@ -266,10 +291,12 @@ const styles = {
   },
   inputIcon: {
     padding: '0 10px 0 14px',
-    fontSize: '15px',
     opacity: 0.5,
     pointerEvents: 'none',
     flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    color: '#e8eef8',
   },
   input: {
     flex: 1,
@@ -287,12 +314,14 @@ const styles = {
     border: 'none',
     cursor: 'pointer',
     padding: '0 12px',
-    fontSize: '16px',
     opacity: 0.6,
     position: 'absolute',
     right: 0,
     top: '50%',
     transform: 'translateY(-50%)',
+    display: 'flex',
+    alignItems: 'center',
+    color: '#e8eef8',
   },
   errorBox: {
     display: 'flex',
