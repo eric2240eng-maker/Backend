@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/user');
+const { sendWelcomeEmail } = require('../utils/emailService');
 
 // POST /api/auth/signup
 router.post('/signup', async (req, res) => {
@@ -18,6 +19,11 @@ router.post('/signup', async (req, res) => {
 
     const user = new User({ name, email, password });
     await user.save();
+
+    // Send welcome email (fire-and-forget — don't let mail failure break signup)
+    sendWelcomeEmail({ to: user.email, name: user.name }).catch(err =>
+      console.error('[Auth] Welcome email failed:', err.message)
+    );
 
     // Do not send password back
     return res.status(201).json({

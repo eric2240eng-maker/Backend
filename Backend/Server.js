@@ -22,7 +22,8 @@ const Alert = require('./models/alert');
 const Setting = require('./models/settings');
 
 // Routes
-const chatbotRouter = require('./routes/chatbot');
+const authRouter      = require('./routes/auth');
+const chatbotRouter   = require('./routes/chatbot');
 const analyticsRouter = require('./routes/analytics');
 const diagnosticsRouter = require('./routes/diagnostics');
 
@@ -166,8 +167,10 @@ app.post("/api/sensor-data", async (req, res) => {
     // Emit live update
     io.emit("sensorData", normalized);
 
-    // Handle alerts
-    await processAlerts(normalized);
+    // Handle alerts + send alert emails
+    const triggeredAlerts = await processAlerts(normalized);
+    const User = require('./models/user');
+    await handleAlertEmails(User, normalized, triggeredAlerts);
 
     res.json({ success: true });
   } catch (err) {
@@ -205,8 +208,10 @@ app.post("/api/airdata", async (req, res) => {
     // Emit live update
     io.emit("sensorData", normalized);
 
-    // Handle alerts
-    await processAlerts(normalized);
+    // Handle alerts + send alert emails
+    const triggeredAlerts = await processAlerts(normalized);
+    const User = require('./models/user');
+    await handleAlertEmails(User, normalized, triggeredAlerts);
 
     res.json({ success: true });
   } catch (err) {
@@ -261,6 +266,9 @@ app.get("/api/settings/:userId", async (req, res) => {
   const doc = await Setting.findOne({ userId: req.params.userId });
   res.json(doc || {});
 });
+
+// ---------- AUTH ROUTES ----------
+app.use("/api/auth", authRouter);
 
 // ---------- CHATBOT ROUTES ----------
 app.use("/api/chatbot", chatbotRouter);
